@@ -19,8 +19,15 @@ resources:
         is_required: false
     update_operation:
       custom_method_name: customUpdateApi
+  DomainName:
+    fields:
+      DomainName:
+        is_primary_key: true
+        is_required: true
+        from:
+          operation: CreateDomainName
+          path: DomainName
 operations:
   CreateApi:
     custom_implementation: customCreateApi
-  GetDomainName:
-    primary_identifier_field_name: DomainName
+
