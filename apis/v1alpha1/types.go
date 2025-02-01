@@ -183,10 +183,7 @@ type DomainName_SDK struct {
 	DomainName *string `json:"domainName,omitempty"`
 	// The domain name configurations.
 	DomainNameConfigurations []*DomainNameConfiguration `json:"domainNameConfigurations,omitempty"`
-	// If specified, API Gateway performs two-way authentication between the client
-	// and the server. Clients must present a trusted certificate to access your
-	// API.
-	MutualTLSAuthentication *MutualTLSAuthentication `json:"mutualTLSAuthentication,omitempty"`
+	MutualTLSAuthentication  *MutualTLSAuthentication   `json:"mutualTLSAuthentication,omitempty"`
 	// Represents a collection of tags associated with the resource.
 	Tags map[string]*string `json:"tags,omitempty"`
 }
@@ -334,9 +331,6 @@ type Model struct {
 	Schema *string `json:"schema,omitempty"`
 }
 
-// If specified, API Gateway performs two-way authentication between the client
-// and the server. Clients must present a trusted certificate to access your
-// API.
 type MutualTLSAuthentication struct {
 	// A string representation of a URI with a length between [1-2048].
 	TruststoreURI *string `json:"truststoreURI,omitempty"`
@@ -345,9 +339,6 @@ type MutualTLSAuthentication struct {
 	TruststoreWarnings []*string `json:"truststoreWarnings,omitempty"`
 }
 
-// If specified, API Gateway performs two-way authentication between the client
-// and the server. Clients must present a trusted certificate to access your
-// API.
 type MutualTLSAuthenticationInput struct {
 	// A string representation of a URI with a length between [1-2048].
 	TruststoreURI *string `json:"truststoreURI,omitempty"`

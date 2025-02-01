@@ -19,6 +19,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"reflect"
 	"strings"
 
@@ -28,8 +29,10 @@ import (
 	ackerr "github.com/aws-controllers-k8s/runtime/pkg/errors"
 	ackrequeue "github.com/aws-controllers-k8s/runtime/pkg/requeue"
 	ackrtlog "github.com/aws-controllers-k8s/runtime/pkg/runtime/log"
-	"github.com/aws/aws-sdk-go/aws"
-	svcsdk "github.com/aws/aws-sdk-go/service/apigatewayv2"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	svcsdk "github.com/aws/aws-sdk-go-v2/service/apigatewayv2"
+	svcsdktypes "github.com/aws/aws-sdk-go-v2/service/apigatewayv2/types"
+	smithy "github.com/aws/smithy-go"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -40,8 +43,7 @@ import (
 var (
 	_ = &metav1.Time{}
 	_ = strings.ToLower("")
-	_ = &aws.JSONValue{}
-	_ = &svcsdk.ApiGatewayV2{}
+	_ = &svcsdk.Client{}
 	_ = &svcapitypes.API{}
 	_ = ackv1alpha1.AWSAccountID("")
 	_ = &ackerr.NotFound
@@ -49,6 +51,7 @@ var (
 	_ = &reflect.Value{}
 	_ = fmt.Sprintf("")
 	_ = &ackrequeue.NoRequeue{}
+	_ = &aws.Config{}
 )
 
 // sdkFind returns SDK-specific information about a supplied resource
@@ -74,13 +77,11 @@ func (rm *resourceManager) sdkFind(
 	}
 
 	var resp *svcsdk.GetApiOutput
-	resp, err = rm.sdkapi.GetApiWithContext(ctx, input)
+	resp, err = rm.sdkapi.GetApi(ctx, input)
 	rm.metrics.RecordAPICall("READ_ONE", "GetApi", err)
 	if err != nil {
-		if reqErr, ok := ackerr.AWSRequestFailure(err); ok && reqErr.StatusCode() == 404 {
-			return nil, ackerr.NotFound
-		}
-		if awsErr, ok := ackerr.AWSError(err); ok && awsErr.Code() == "NotFoundException" {
+		var awsErr smithy.APIError
+		if errors.As(err, &awsErr) && awsErr.ErrorCode() == "NotFoundException" {
 			return nil, ackerr.NotFound
 		}
 		return nil, err
@@ -116,43 +117,20 @@ func (rm *resourceManager) sdkFind(
 			f4.AllowCredentials = resp.CorsConfiguration.AllowCredentials
 		}
 		if resp.CorsConfiguration.AllowHeaders != nil {
-			f4f1 := []*string{}
-			for _, f4f1iter := range resp.CorsConfiguration.AllowHeaders {
-				var f4f1elem string
-				f4f1elem = *f4f1iter
-				f4f1 = append(f4f1, &f4f1elem)
-			}
-			f4.AllowHeaders = f4f1
+			f4.AllowHeaders = aws.StringSlice(resp.CorsConfiguration.AllowHeaders)
 		}
 		if resp.CorsConfiguration.AllowMethods != nil {
-			f4f2 := []*string{}
-			for _, f4f2iter := range resp.CorsConfiguration.AllowMethods {
-				var f4f2elem string
-				f4f2elem = *f4f2iter
-				f4f2 = append(f4f2, &f4f2elem)
-			}
-			f4.AllowMethods = f4f2
+			f4.AllowMethods = aws.StringSlice(resp.CorsConfiguration.AllowMethods)
 		}
 		if resp.CorsConfiguration.AllowOrigins != nil {
-			f4f3 := []*string{}
-			for _, f4f3iter := range resp.CorsConfiguration.AllowOrigins {
-				var f4f3elem string
-				f4f3elem = *f4f3iter
-				f4f3 = append(f4f3, &f4f3elem)
-			}
-			f4.AllowOrigins = f4f3
+			f4.AllowOrigins = aws.StringSlice(resp.CorsConfiguration.AllowOrigins)
 		}
 		if resp.CorsConfiguration.ExposeHeaders != nil {
-			f4f4 := []*string{}
-			for _, f4f4iter := range resp.CorsConfiguration.ExposeHeaders {
-				var f4f4elem string
-				f4f4elem = *f4f4iter
-				f4f4 = append(f4f4, &f4f4elem)
-			}
-			f4.ExposeHeaders = f4f4
+			f4.ExposeHeaders = aws.StringSlice(resp.CorsConfiguration.ExposeHeaders)
 		}
 		if resp.CorsConfiguration.MaxAge != nil {
-			f4.MaxAge = resp.CorsConfiguration.MaxAge
+			maxAgeCopy := int64(*resp.CorsConfiguration.MaxAge)
+			f4.MaxAge = &maxAgeCopy
 		}
 		ko.Spec.CORSConfiguration = f4
 	} else {
@@ -179,13 +157,7 @@ func (rm *resourceManager) sdkFind(
 		ko.Spec.DisableSchemaValidation = nil
 	}
 	if resp.ImportInfo != nil {
-		f9 := []*string{}
-		for _, f9iter := range resp.ImportInfo {
-			var f9elem string
-			f9elem = *f9iter
-			f9 = append(f9, &f9elem)
-		}
-		ko.Status.ImportInfo = f9
+		ko.Status.ImportInfo = aws.StringSlice(resp.ImportInfo)
 	} else {
 		ko.Status.ImportInfo = nil
 	}
@@ -194,8 +166,8 @@ func (rm *resourceManager) sdkFind(
 	} else {
 		ko.Spec.Name = nil
 	}
-	if resp.ProtocolType != nil {
-		ko.Spec.ProtocolType = resp.ProtocolType
+	if resp.ProtocolType != "" {
+		ko.Spec.ProtocolType = aws.String(string(resp.ProtocolType))
 	} else {
 		ko.Spec.ProtocolType = nil
 	}
@@ -205,13 +177,7 @@ func (rm *resourceManager) sdkFind(
 		ko.Spec.RouteSelectionExpression = nil
 	}
 	if resp.Tags != nil {
-		f13 := map[string]*string{}
-		for f13key, f13valiter := range resp.Tags {
-			var f13val string
-			f13val = *f13valiter
-			f13[f13key] = &f13val
-		}
-		ko.Spec.Tags = f13
+		ko.Spec.Tags = aws.StringMap(resp.Tags)
 	} else {
 		ko.Spec.Tags = nil
 	}
@@ -221,13 +187,7 @@ func (rm *resourceManager) sdkFind(
 		ko.Spec.Version = nil
 	}
 	if resp.Warnings != nil {
-		f15 := []*string{}
-		for _, f15iter := range resp.Warnings {
-			var f15elem string
-			f15elem = *f15iter
-			f15 = append(f15, &f15elem)
-		}
-		ko.Status.Warnings = f15
+		ko.Status.Warnings = aws.StringSlice(resp.Warnings)
 	} else {
 		ko.Status.Warnings = nil
 	}
@@ -254,7 +214,7 @@ func (rm *resourceManager) newDescribeRequestPayload(
 	res := &svcsdk.GetApiInput{}
 
 	if r.ko.Status.APIID != nil {
-		res.SetApiId(*r.ko.Status.APIID)
+		res.ApiId = r.ko.Status.APIID
 	}
 
 	return res, nil
@@ -283,7 +243,7 @@ func (rm *resourceManager) sdkCreate(
 
 	var resp *svcsdk.CreateApiOutput
 	_ = resp
-	resp, err = rm.sdkapi.CreateApiWithContext(ctx, input)
+	resp, err = rm.sdkapi.CreateApi(ctx, input)
 	rm.metrics.RecordAPICall("CREATE", "CreateApi", err)
 	if err != nil {
 		return nil, err
@@ -318,43 +278,20 @@ func (rm *resourceManager) sdkCreate(
 			f4.AllowCredentials = resp.CorsConfiguration.AllowCredentials
 		}
 		if resp.CorsConfiguration.AllowHeaders != nil {
-			f4f1 := []*string{}
-			for _, f4f1iter := range resp.CorsConfiguration.AllowHeaders {
-				var f4f1elem string
-				f4f1elem = *f4f1iter
-				f4f1 = append(f4f1, &f4f1elem)
-			}
-			f4.AllowHeaders = f4f1
+			f4.AllowHeaders = aws.StringSlice(resp.CorsConfiguration.AllowHeaders)
 		}
 		if resp.CorsConfiguration.AllowMethods != nil {
-			f4f2 := []*string{}
-			for _, f4f2iter := range resp.CorsConfiguration.AllowMethods {
-				var f4f2elem string
-				f4f2elem = *f4f2iter
-				f4f2 = append(f4f2, &f4f2elem)
-			}
-			f4.AllowMethods = f4f2
+			f4.AllowMethods = aws.StringSlice(resp.CorsConfiguration.AllowMethods)
 		}
 		if resp.CorsConfiguration.AllowOrigins != nil {
-			f4f3 := []*string{}
-			for _, f4f3iter := range resp.CorsConfiguration.AllowOrigins {
-				var f4f3elem string
-				f4f3elem = *f4f3iter
-				f4f3 = append(f4f3, &f4f3elem)
-			}
-			f4.AllowOrigins = f4f3
+			f4.AllowOrigins = aws.StringSlice(resp.CorsConfiguration.AllowOrigins)
 		}
 		if resp.CorsConfiguration.ExposeHeaders != nil {
-			f4f4 := []*string{}
-			for _, f4f4iter := range resp.CorsConfiguration.ExposeHeaders {
-				var f4f4elem string
-				f4f4elem = *f4f4iter
-				f4f4 = append(f4f4, &f4f4elem)
-			}
-			f4.ExposeHeaders = f4f4
+			f4.ExposeHeaders = aws.StringSlice(resp.CorsConfiguration.ExposeHeaders)
 		}
 		if resp.CorsConfiguration.MaxAge != nil {
-			f4.MaxAge = resp.CorsConfiguration.MaxAge
+			maxAgeCopy := int64(*resp.CorsConfiguration.MaxAge)
+			f4.MaxAge = &maxAgeCopy
 		}
 		ko.Spec.CORSConfiguration = f4
 	} else {
@@ -381,13 +318,7 @@ func (rm *resourceManager) sdkCreate(
 		ko.Spec.DisableSchemaValidation = nil
 	}
 	if resp.ImportInfo != nil {
-		f9 := []*string{}
-		for _, f9iter := range resp.ImportInfo {
-			var f9elem string
-			f9elem = *f9iter
-			f9 = append(f9, &f9elem)
-		}
-		ko.Status.ImportInfo = f9
+		ko.Status.ImportInfo = aws.StringSlice(resp.ImportInfo)
 	} else {
 		ko.Status.ImportInfo = nil
 	}
@@ -396,8 +327,8 @@ func (rm *resourceManager) sdkCreate(
 	} else {
 		ko.Spec.Name = nil
 	}
-	if resp.ProtocolType != nil {
-		ko.Spec.ProtocolType = resp.ProtocolType
+	if resp.ProtocolType != "" {
+		ko.Spec.ProtocolType = aws.String(string(resp.ProtocolType))
 	} else {
 		ko.Spec.ProtocolType = nil
 	}
@@ -407,13 +338,7 @@ func (rm *resourceManager) sdkCreate(
 		ko.Spec.RouteSelectionExpression = nil
 	}
 	if resp.Tags != nil {
-		f13 := map[string]*string{}
-		for f13key, f13valiter := range resp.Tags {
-			var f13val string
-			f13val = *f13valiter
-			f13[f13key] = &f13val
-		}
-		ko.Spec.Tags = f13
+		ko.Spec.Tags = aws.StringMap(resp.Tags)
 	} else {
 		ko.Spec.Tags = nil
 	}
@@ -423,13 +348,7 @@ func (rm *resourceManager) sdkCreate(
 		ko.Spec.Version = nil
 	}
 	if resp.Warnings != nil {
-		f15 := []*string{}
-		for _, f15iter := range resp.Warnings {
-			var f15elem string
-			f15elem = *f15iter
-			f15 = append(f15, &f15elem)
-		}
-		ko.Status.Warnings = f15
+		ko.Status.Warnings = aws.StringSlice(resp.Warnings)
 	} else {
 		ko.Status.Warnings = nil
 	}
@@ -447,92 +366,67 @@ func (rm *resourceManager) newCreateRequestPayload(
 	res := &svcsdk.CreateApiInput{}
 
 	if r.ko.Spec.APIKeySelectionExpression != nil {
-		res.SetApiKeySelectionExpression(*r.ko.Spec.APIKeySelectionExpression)
+		res.ApiKeySelectionExpression = r.ko.Spec.APIKeySelectionExpression
 	}
 	if r.ko.Spec.CORSConfiguration != nil {
-		f1 := &svcsdk.Cors{}
+		f1 := &svcsdktypes.Cors{}
 		if r.ko.Spec.CORSConfiguration.AllowCredentials != nil {
-			f1.SetAllowCredentials(*r.ko.Spec.CORSConfiguration.AllowCredentials)
+			f1.AllowCredentials = r.ko.Spec.CORSConfiguration.AllowCredentials
 		}
 		if r.ko.Spec.CORSConfiguration.AllowHeaders != nil {
-			f1f1 := []*string{}
-			for _, f1f1iter := range r.ko.Spec.CORSConfiguration.AllowHeaders {
-				var f1f1elem string
-				f1f1elem = *f1f1iter
-				f1f1 = append(f1f1, &f1f1elem)
-			}
-			f1.SetAllowHeaders(f1f1)
+			f1.AllowHeaders = aws.ToStringSlice(r.ko.Spec.CORSConfiguration.AllowHeaders)
 		}
 		if r.ko.Spec.CORSConfiguration.AllowMethods != nil {
-			f1f2 := []*string{}
-			for _, f1f2iter := range r.ko.Spec.CORSConfiguration.AllowMethods {
-				var f1f2elem string
-				f1f2elem = *f1f2iter
-				f1f2 = append(f1f2, &f1f2elem)
-			}
-			f1.SetAllowMethods(f1f2)
+			f1.AllowMethods = aws.ToStringSlice(r.ko.Spec.CORSConfiguration.AllowMethods)
 		}
 		if r.ko.Spec.CORSConfiguration.AllowOrigins != nil {
-			f1f3 := []*string{}
-			for _, f1f3iter := range r.ko.Spec.CORSConfiguration.AllowOrigins {
-				var f1f3elem string
-				f1f3elem = *f1f3iter
-				f1f3 = append(f1f3, &f1f3elem)
-			}
-			f1.SetAllowOrigins(f1f3)
+			f1.AllowOrigins = aws.ToStringSlice(r.ko.Spec.CORSConfiguration.AllowOrigins)
 		}
 		if r.ko.Spec.CORSConfiguration.ExposeHeaders != nil {
-			f1f4 := []*string{}
-			for _, f1f4iter := range r.ko.Spec.CORSConfiguration.ExposeHeaders {
-				var f1f4elem string
-				f1f4elem = *f1f4iter
-				f1f4 = append(f1f4, &f1f4elem)
-			}
-			f1.SetExposeHeaders(f1f4)
+			f1.ExposeHeaders = aws.ToStringSlice(r.ko.Spec.CORSConfiguration.ExposeHeaders)
 		}
 		if r.ko.Spec.CORSConfiguration.MaxAge != nil {
-			f1.SetMaxAge(*r.ko.Spec.CORSConfiguration.MaxAge)
+			maxAgeCopy0 := *r.ko.Spec.CORSConfiguration.MaxAge
+			if maxAgeCopy0 > math.MaxInt32 || maxAgeCopy0 < math.MinInt32 {
+				return nil, fmt.Errorf("error: field MaxAge is of type int32")
+			}
+			maxAgeCopy := int32(maxAgeCopy0)
+			f1.MaxAge = &maxAgeCopy
 		}
-		res.SetCorsConfiguration(f1)
+		res.CorsConfiguration = f1
 	}
 	if r.ko.Spec.CredentialsARN != nil {
-		res.SetCredentialsArn(*r.ko.Spec.CredentialsARN)
+		res.CredentialsArn = r.ko.Spec.CredentialsARN
 	}
 	if r.ko.Spec.Description != nil {
-		res.SetDescription(*r.ko.Spec.Description)
+		res.Description = r.ko.Spec.Description
 	}
 	if r.ko.Spec.DisableExecuteAPIEndpoint != nil {
-		res.SetDisableExecuteApiEndpoint(*r.ko.Spec.DisableExecuteAPIEndpoint)
+		res.DisableExecuteApiEndpoint = r.ko.Spec.DisableExecuteAPIEndpoint
 	}
 	if r.ko.Spec.DisableSchemaValidation != nil {
-		res.SetDisableSchemaValidation(*r.ko.Spec.DisableSchemaValidation)
+		res.DisableSchemaValidation = r.ko.Spec.DisableSchemaValidation
 	}
 	if r.ko.Spec.Name != nil {
-		res.SetName(*r.ko.Spec.Name)
+		res.Name = r.ko.Spec.Name
 	}
 	if r.ko.Spec.ProtocolType != nil {
-		res.SetProtocolType(*r.ko.Spec.ProtocolType)
+		res.ProtocolType = svcsdktypes.ProtocolType(*r.ko.Spec.ProtocolType)
 	}
 	if r.ko.Spec.RouteKey != nil {
-		res.SetRouteKey(*r.ko.Spec.RouteKey)
+		res.RouteKey = r.ko.Spec.RouteKey
 	}
 	if r.ko.Spec.RouteSelectionExpression != nil {
-		res.SetRouteSelectionExpression(*r.ko.Spec.RouteSelectionExpression)
+		res.RouteSelectionExpression = r.ko.Spec.RouteSelectionExpression
 	}
 	if r.ko.Spec.Tags != nil {
-		f10 := map[string]*string{}
-		for f10key, f10valiter := range r.ko.Spec.Tags {
-			var f10val string
-			f10val = *f10valiter
-			f10[f10key] = &f10val
-		}
-		res.SetTags(f10)
+		res.Tags = aws.ToStringMap(r.ko.Spec.Tags)
 	}
 	if r.ko.Spec.Target != nil {
-		res.SetTarget(*r.ko.Spec.Target)
+		res.Target = r.ko.Spec.Target
 	}
 	if r.ko.Spec.Version != nil {
-		res.SetVersion(*r.ko.Spec.Version)
+		res.Version = r.ko.Spec.Version
 	}
 
 	return res, nil
@@ -565,7 +459,7 @@ func (rm *resourceManager) sdkDelete(
 	}
 	var resp *svcsdk.DeleteApiOutput
 	_ = resp
-	resp, err = rm.sdkapi.DeleteApiWithContext(ctx, input)
+	resp, err = rm.sdkapi.DeleteApi(ctx, input)
 	rm.metrics.RecordAPICall("DELETE", "DeleteApi", err)
 	return nil, err
 }
@@ -578,7 +472,7 @@ func (rm *resourceManager) newDeleteRequestPayload(
 	res := &svcsdk.DeleteApiInput{}
 
 	if r.ko.Status.APIID != nil {
-		res.SetApiId(*r.ko.Status.APIID)
+		res.ApiId = r.ko.Status.APIID
 	}
 
 	return res, nil

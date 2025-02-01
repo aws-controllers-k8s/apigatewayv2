@@ -19,6 +19,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"reflect"
 	"strings"
 
@@ -28,8 +29,10 @@ import (
 	ackerr "github.com/aws-controllers-k8s/runtime/pkg/errors"
 	ackrequeue "github.com/aws-controllers-k8s/runtime/pkg/requeue"
 	ackrtlog "github.com/aws-controllers-k8s/runtime/pkg/runtime/log"
-	"github.com/aws/aws-sdk-go/aws"
-	svcsdk "github.com/aws/aws-sdk-go/service/apigatewayv2"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	svcsdk "github.com/aws/aws-sdk-go-v2/service/apigatewayv2"
+	svcsdktypes "github.com/aws/aws-sdk-go-v2/service/apigatewayv2/types"
+	smithy "github.com/aws/smithy-go"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -40,8 +43,7 @@ import (
 var (
 	_ = &metav1.Time{}
 	_ = strings.ToLower("")
-	_ = &aws.JSONValue{}
-	_ = &svcsdk.ApiGatewayV2{}
+	_ = &svcsdk.Client{}
 	_ = &svcapitypes.Authorizer{}
 	_ = ackv1alpha1.AWSAccountID("")
 	_ = &ackerr.NotFound
@@ -49,6 +51,7 @@ var (
 	_ = &reflect.Value{}
 	_ = fmt.Sprintf("")
 	_ = &ackrequeue.NoRequeue{}
+	_ = &aws.Config{}
 )
 
 // sdkFind returns SDK-specific information about a supplied resource
@@ -74,13 +77,11 @@ func (rm *resourceManager) sdkFind(
 	}
 
 	var resp *svcsdk.GetAuthorizerOutput
-	resp, err = rm.sdkapi.GetAuthorizerWithContext(ctx, input)
+	resp, err = rm.sdkapi.GetAuthorizer(ctx, input)
 	rm.metrics.RecordAPICall("READ_ONE", "GetAuthorizer", err)
 	if err != nil {
-		if reqErr, ok := ackerr.AWSRequestFailure(err); ok && reqErr.StatusCode() == 404 {
-			return nil, ackerr.NotFound
-		}
-		if awsErr, ok := ackerr.AWSError(err); ok && awsErr.Code() == "NotFoundException" {
+		var awsErr smithy.APIError
+		if errors.As(err, &awsErr) && awsErr.ErrorCode() == "NotFoundException" {
 			return nil, ackerr.NotFound
 		}
 		return nil, err
@@ -106,12 +107,13 @@ func (rm *resourceManager) sdkFind(
 		ko.Spec.AuthorizerPayloadFormatVersion = nil
 	}
 	if resp.AuthorizerResultTtlInSeconds != nil {
-		ko.Spec.AuthorizerResultTTLInSeconds = resp.AuthorizerResultTtlInSeconds
+		authorizerResultTTLInSecondsCopy := int64(*resp.AuthorizerResultTtlInSeconds)
+		ko.Spec.AuthorizerResultTTLInSeconds = &authorizerResultTTLInSecondsCopy
 	} else {
 		ko.Spec.AuthorizerResultTTLInSeconds = nil
 	}
-	if resp.AuthorizerType != nil {
-		ko.Spec.AuthorizerType = resp.AuthorizerType
+	if resp.AuthorizerType != "" {
+		ko.Spec.AuthorizerType = aws.String(string(resp.AuthorizerType))
 	} else {
 		ko.Spec.AuthorizerType = nil
 	}
@@ -126,13 +128,7 @@ func (rm *resourceManager) sdkFind(
 		ko.Spec.EnableSimpleResponses = nil
 	}
 	if resp.IdentitySource != nil {
-		f7 := []*string{}
-		for _, f7iter := range resp.IdentitySource {
-			var f7elem string
-			f7elem = *f7iter
-			f7 = append(f7, &f7elem)
-		}
-		ko.Spec.IdentitySource = f7
+		ko.Spec.IdentitySource = aws.StringSlice(resp.IdentitySource)
 	} else {
 		ko.Spec.IdentitySource = nil
 	}
@@ -144,13 +140,7 @@ func (rm *resourceManager) sdkFind(
 	if resp.JwtConfiguration != nil {
 		f9 := &svcapitypes.JWTConfiguration{}
 		if resp.JwtConfiguration.Audience != nil {
-			f9f0 := []*string{}
-			for _, f9f0iter := range resp.JwtConfiguration.Audience {
-				var f9f0elem string
-				f9f0elem = *f9f0iter
-				f9f0 = append(f9f0, &f9f0elem)
-			}
-			f9.Audience = f9f0
+			f9.Audience = aws.StringSlice(resp.JwtConfiguration.Audience)
 		}
 		if resp.JwtConfiguration.Issuer != nil {
 			f9.Issuer = resp.JwtConfiguration.Issuer
@@ -175,7 +165,7 @@ func (rm *resourceManager) sdkFind(
 func (rm *resourceManager) requiredFieldsMissingFromReadOneInput(
 	r *resource,
 ) bool {
-	return r.ko.Status.AuthorizerID == nil || r.ko.Spec.APIID == nil
+	return r.ko.Spec.APIID == nil || r.ko.Status.AuthorizerID == nil
 
 }
 
@@ -187,10 +177,10 @@ func (rm *resourceManager) newDescribeRequestPayload(
 	res := &svcsdk.GetAuthorizerInput{}
 
 	if r.ko.Spec.APIID != nil {
-		res.SetApiId(*r.ko.Spec.APIID)
+		res.ApiId = r.ko.Spec.APIID
 	}
 	if r.ko.Status.AuthorizerID != nil {
-		res.SetAuthorizerId(*r.ko.Status.AuthorizerID)
+		res.AuthorizerId = r.ko.Status.AuthorizerID
 	}
 
 	return res, nil
@@ -215,7 +205,7 @@ func (rm *resourceManager) sdkCreate(
 
 	var resp *svcsdk.CreateAuthorizerOutput
 	_ = resp
-	resp, err = rm.sdkapi.CreateAuthorizerWithContext(ctx, input)
+	resp, err = rm.sdkapi.CreateAuthorizer(ctx, input)
 	rm.metrics.RecordAPICall("CREATE", "CreateAuthorizer", err)
 	if err != nil {
 		return nil, err
@@ -240,12 +230,13 @@ func (rm *resourceManager) sdkCreate(
 		ko.Spec.AuthorizerPayloadFormatVersion = nil
 	}
 	if resp.AuthorizerResultTtlInSeconds != nil {
-		ko.Spec.AuthorizerResultTTLInSeconds = resp.AuthorizerResultTtlInSeconds
+		authorizerResultTTLInSecondsCopy := int64(*resp.AuthorizerResultTtlInSeconds)
+		ko.Spec.AuthorizerResultTTLInSeconds = &authorizerResultTTLInSecondsCopy
 	} else {
 		ko.Spec.AuthorizerResultTTLInSeconds = nil
 	}
-	if resp.AuthorizerType != nil {
-		ko.Spec.AuthorizerType = resp.AuthorizerType
+	if resp.AuthorizerType != "" {
+		ko.Spec.AuthorizerType = aws.String(string(resp.AuthorizerType))
 	} else {
 		ko.Spec.AuthorizerType = nil
 	}
@@ -260,13 +251,7 @@ func (rm *resourceManager) sdkCreate(
 		ko.Spec.EnableSimpleResponses = nil
 	}
 	if resp.IdentitySource != nil {
-		f7 := []*string{}
-		for _, f7iter := range resp.IdentitySource {
-			var f7elem string
-			f7elem = *f7iter
-			f7 = append(f7, &f7elem)
-		}
-		ko.Spec.IdentitySource = f7
+		ko.Spec.IdentitySource = aws.StringSlice(resp.IdentitySource)
 	} else {
 		ko.Spec.IdentitySource = nil
 	}
@@ -278,13 +263,7 @@ func (rm *resourceManager) sdkCreate(
 	if resp.JwtConfiguration != nil {
 		f9 := &svcapitypes.JWTConfiguration{}
 		if resp.JwtConfiguration.Audience != nil {
-			f9f0 := []*string{}
-			for _, f9f0iter := range resp.JwtConfiguration.Audience {
-				var f9f0elem string
-				f9f0elem = *f9f0iter
-				f9f0 = append(f9f0, &f9f0elem)
-			}
-			f9.Audience = f9f0
+			f9.Audience = aws.StringSlice(resp.JwtConfiguration.Audience)
 		}
 		if resp.JwtConfiguration.Issuer != nil {
 			f9.Issuer = resp.JwtConfiguration.Issuer
@@ -312,56 +291,49 @@ func (rm *resourceManager) newCreateRequestPayload(
 	res := &svcsdk.CreateAuthorizerInput{}
 
 	if r.ko.Spec.APIID != nil {
-		res.SetApiId(*r.ko.Spec.APIID)
+		res.ApiId = r.ko.Spec.APIID
 	}
 	if r.ko.Spec.AuthorizerCredentialsARN != nil {
-		res.SetAuthorizerCredentialsArn(*r.ko.Spec.AuthorizerCredentialsARN)
+		res.AuthorizerCredentialsArn = r.ko.Spec.AuthorizerCredentialsARN
 	}
 	if r.ko.Spec.AuthorizerPayloadFormatVersion != nil {
-		res.SetAuthorizerPayloadFormatVersion(*r.ko.Spec.AuthorizerPayloadFormatVersion)
+		res.AuthorizerPayloadFormatVersion = r.ko.Spec.AuthorizerPayloadFormatVersion
 	}
 	if r.ko.Spec.AuthorizerResultTTLInSeconds != nil {
-		res.SetAuthorizerResultTtlInSeconds(*r.ko.Spec.AuthorizerResultTTLInSeconds)
+		authorizerResultTTLInSecondsCopy0 := *r.ko.Spec.AuthorizerResultTTLInSeconds
+		if authorizerResultTTLInSecondsCopy0 > math.MaxInt32 || authorizerResultTTLInSecondsCopy0 < math.MinInt32 {
+			return nil, fmt.Errorf("error: field AuthorizerResultTtlInSeconds is of type int32")
+		}
+		authorizerResultTTLInSecondsCopy := int32(authorizerResultTTLInSecondsCopy0)
+		res.AuthorizerResultTtlInSeconds = &authorizerResultTTLInSecondsCopy
 	}
 	if r.ko.Spec.AuthorizerType != nil {
-		res.SetAuthorizerType(*r.ko.Spec.AuthorizerType)
+		res.AuthorizerType = svcsdktypes.AuthorizerType(*r.ko.Spec.AuthorizerType)
 	}
 	if r.ko.Spec.AuthorizerURI != nil {
-		res.SetAuthorizerUri(*r.ko.Spec.AuthorizerURI)
+		res.AuthorizerUri = r.ko.Spec.AuthorizerURI
 	}
 	if r.ko.Spec.EnableSimpleResponses != nil {
-		res.SetEnableSimpleResponses(*r.ko.Spec.EnableSimpleResponses)
+		res.EnableSimpleResponses = r.ko.Spec.EnableSimpleResponses
 	}
 	if r.ko.Spec.IdentitySource != nil {
-		f7 := []*string{}
-		for _, f7iter := range r.ko.Spec.IdentitySource {
-			var f7elem string
-			f7elem = *f7iter
-			f7 = append(f7, &f7elem)
-		}
-		res.SetIdentitySource(f7)
+		res.IdentitySource = aws.ToStringSlice(r.ko.Spec.IdentitySource)
 	}
 	if r.ko.Spec.IdentityValidationExpression != nil {
-		res.SetIdentityValidationExpression(*r.ko.Spec.IdentityValidationExpression)
+		res.IdentityValidationExpression = r.ko.Spec.IdentityValidationExpression
 	}
 	if r.ko.Spec.JWTConfiguration != nil {
-		f9 := &svcsdk.JWTConfiguration{}
+		f9 := &svcsdktypes.JWTConfiguration{}
 		if r.ko.Spec.JWTConfiguration.Audience != nil {
-			f9f0 := []*string{}
-			for _, f9f0iter := range r.ko.Spec.JWTConfiguration.Audience {
-				var f9f0elem string
-				f9f0elem = *f9f0iter
-				f9f0 = append(f9f0, &f9f0elem)
-			}
-			f9.SetAudience(f9f0)
+			f9.Audience = aws.ToStringSlice(r.ko.Spec.JWTConfiguration.Audience)
 		}
 		if r.ko.Spec.JWTConfiguration.Issuer != nil {
-			f9.SetIssuer(*r.ko.Spec.JWTConfiguration.Issuer)
+			f9.Issuer = r.ko.Spec.JWTConfiguration.Issuer
 		}
-		res.SetJwtConfiguration(f9)
+		res.JwtConfiguration = f9
 	}
 	if r.ko.Spec.Name != nil {
-		res.SetName(*r.ko.Spec.Name)
+		res.Name = r.ko.Spec.Name
 	}
 
 	return res, nil
@@ -387,7 +359,7 @@ func (rm *resourceManager) sdkUpdate(
 
 	var resp *svcsdk.UpdateAuthorizerOutput
 	_ = resp
-	resp, err = rm.sdkapi.UpdateAuthorizerWithContext(ctx, input)
+	resp, err = rm.sdkapi.UpdateAuthorizer(ctx, input)
 	rm.metrics.RecordAPICall("UPDATE", "UpdateAuthorizer", err)
 	if err != nil {
 		return nil, err
@@ -412,12 +384,13 @@ func (rm *resourceManager) sdkUpdate(
 		ko.Spec.AuthorizerPayloadFormatVersion = nil
 	}
 	if resp.AuthorizerResultTtlInSeconds != nil {
-		ko.Spec.AuthorizerResultTTLInSeconds = resp.AuthorizerResultTtlInSeconds
+		authorizerResultTTLInSecondsCopy := int64(*resp.AuthorizerResultTtlInSeconds)
+		ko.Spec.AuthorizerResultTTLInSeconds = &authorizerResultTTLInSecondsCopy
 	} else {
 		ko.Spec.AuthorizerResultTTLInSeconds = nil
 	}
-	if resp.AuthorizerType != nil {
-		ko.Spec.AuthorizerType = resp.AuthorizerType
+	if resp.AuthorizerType != "" {
+		ko.Spec.AuthorizerType = aws.String(string(resp.AuthorizerType))
 	} else {
 		ko.Spec.AuthorizerType = nil
 	}
@@ -432,13 +405,7 @@ func (rm *resourceManager) sdkUpdate(
 		ko.Spec.EnableSimpleResponses = nil
 	}
 	if resp.IdentitySource != nil {
-		f7 := []*string{}
-		for _, f7iter := range resp.IdentitySource {
-			var f7elem string
-			f7elem = *f7iter
-			f7 = append(f7, &f7elem)
-		}
-		ko.Spec.IdentitySource = f7
+		ko.Spec.IdentitySource = aws.StringSlice(resp.IdentitySource)
 	} else {
 		ko.Spec.IdentitySource = nil
 	}
@@ -450,13 +417,7 @@ func (rm *resourceManager) sdkUpdate(
 	if resp.JwtConfiguration != nil {
 		f9 := &svcapitypes.JWTConfiguration{}
 		if resp.JwtConfiguration.Audience != nil {
-			f9f0 := []*string{}
-			for _, f9f0iter := range resp.JwtConfiguration.Audience {
-				var f9f0elem string
-				f9f0elem = *f9f0iter
-				f9f0 = append(f9f0, &f9f0elem)
-			}
-			f9.Audience = f9f0
+			f9.Audience = aws.StringSlice(resp.JwtConfiguration.Audience)
 		}
 		if resp.JwtConfiguration.Issuer != nil {
 			f9.Issuer = resp.JwtConfiguration.Issuer
@@ -485,59 +446,52 @@ func (rm *resourceManager) newUpdateRequestPayload(
 	res := &svcsdk.UpdateAuthorizerInput{}
 
 	if r.ko.Spec.APIID != nil {
-		res.SetApiId(*r.ko.Spec.APIID)
+		res.ApiId = r.ko.Spec.APIID
 	}
 	if r.ko.Spec.AuthorizerCredentialsARN != nil {
-		res.SetAuthorizerCredentialsArn(*r.ko.Spec.AuthorizerCredentialsARN)
+		res.AuthorizerCredentialsArn = r.ko.Spec.AuthorizerCredentialsARN
 	}
 	if r.ko.Status.AuthorizerID != nil {
-		res.SetAuthorizerId(*r.ko.Status.AuthorizerID)
+		res.AuthorizerId = r.ko.Status.AuthorizerID
 	}
 	if r.ko.Spec.AuthorizerPayloadFormatVersion != nil {
-		res.SetAuthorizerPayloadFormatVersion(*r.ko.Spec.AuthorizerPayloadFormatVersion)
+		res.AuthorizerPayloadFormatVersion = r.ko.Spec.AuthorizerPayloadFormatVersion
 	}
 	if r.ko.Spec.AuthorizerResultTTLInSeconds != nil {
-		res.SetAuthorizerResultTtlInSeconds(*r.ko.Spec.AuthorizerResultTTLInSeconds)
+		authorizerResultTTLInSecondsCopy0 := *r.ko.Spec.AuthorizerResultTTLInSeconds
+		if authorizerResultTTLInSecondsCopy0 > math.MaxInt32 || authorizerResultTTLInSecondsCopy0 < math.MinInt32 {
+			return nil, fmt.Errorf("error: field AuthorizerResultTtlInSeconds is of type int32")
+		}
+		authorizerResultTTLInSecondsCopy := int32(authorizerResultTTLInSecondsCopy0)
+		res.AuthorizerResultTtlInSeconds = &authorizerResultTTLInSecondsCopy
 	}
 	if r.ko.Spec.AuthorizerType != nil {
-		res.SetAuthorizerType(*r.ko.Spec.AuthorizerType)
+		res.AuthorizerType = svcsdktypes.AuthorizerType(*r.ko.Spec.AuthorizerType)
 	}
 	if r.ko.Spec.AuthorizerURI != nil {
-		res.SetAuthorizerUri(*r.ko.Spec.AuthorizerURI)
+		res.AuthorizerUri = r.ko.Spec.AuthorizerURI
 	}
 	if r.ko.Spec.EnableSimpleResponses != nil {
-		res.SetEnableSimpleResponses(*r.ko.Spec.EnableSimpleResponses)
+		res.EnableSimpleResponses = r.ko.Spec.EnableSimpleResponses
 	}
 	if r.ko.Spec.IdentitySource != nil {
-		f8 := []*string{}
-		for _, f8iter := range r.ko.Spec.IdentitySource {
-			var f8elem string
-			f8elem = *f8iter
-			f8 = append(f8, &f8elem)
-		}
-		res.SetIdentitySource(f8)
+		res.IdentitySource = aws.ToStringSlice(r.ko.Spec.IdentitySource)
 	}
 	if r.ko.Spec.IdentityValidationExpression != nil {
-		res.SetIdentityValidationExpression(*r.ko.Spec.IdentityValidationExpression)
+		res.IdentityValidationExpression = r.ko.Spec.IdentityValidationExpression
 	}
 	if r.ko.Spec.JWTConfiguration != nil {
-		f10 := &svcsdk.JWTConfiguration{}
+		f10 := &svcsdktypes.JWTConfiguration{}
 		if r.ko.Spec.JWTConfiguration.Audience != nil {
-			f10f0 := []*string{}
-			for _, f10f0iter := range r.ko.Spec.JWTConfiguration.Audience {
-				var f10f0elem string
-				f10f0elem = *f10f0iter
-				f10f0 = append(f10f0, &f10f0elem)
-			}
-			f10.SetAudience(f10f0)
+			f10.Audience = aws.ToStringSlice(r.ko.Spec.JWTConfiguration.Audience)
 		}
 		if r.ko.Spec.JWTConfiguration.Issuer != nil {
-			f10.SetIssuer(*r.ko.Spec.JWTConfiguration.Issuer)
+			f10.Issuer = r.ko.Spec.JWTConfiguration.Issuer
 		}
-		res.SetJwtConfiguration(f10)
+		res.JwtConfiguration = f10
 	}
 	if r.ko.Spec.Name != nil {
-		res.SetName(*r.ko.Spec.Name)
+		res.Name = r.ko.Spec.Name
 	}
 
 	return res, nil
@@ -559,7 +513,7 @@ func (rm *resourceManager) sdkDelete(
 	}
 	var resp *svcsdk.DeleteAuthorizerOutput
 	_ = resp
-	resp, err = rm.sdkapi.DeleteAuthorizerWithContext(ctx, input)
+	resp, err = rm.sdkapi.DeleteAuthorizer(ctx, input)
 	rm.metrics.RecordAPICall("DELETE", "DeleteAuthorizer", err)
 	return nil, err
 }
@@ -572,10 +526,10 @@ func (rm *resourceManager) newDeleteRequestPayload(
 	res := &svcsdk.DeleteAuthorizerInput{}
 
 	if r.ko.Spec.APIID != nil {
-		res.SetApiId(*r.ko.Spec.APIID)
+		res.ApiId = r.ko.Spec.APIID
 	}
 	if r.ko.Status.AuthorizerID != nil {
-		res.SetAuthorizerId(*r.ko.Status.AuthorizerID)
+		res.AuthorizerId = r.ko.Status.AuthorizerID
 	}
 
 	return res, nil

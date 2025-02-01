@@ -43,8 +43,10 @@ spec:
               Represents a domain name.
             properties:
               domainName:
+                description: The domain name.
                 type: string
               domainNameConfigurations:
+                description: The domain name configurations.
                 items:
                   description: The domain name configuration.
                   properties:
@@ -68,10 +70,8 @@ spec:
                   type: object
                 type: array
               mutualTLSAuthentication:
-                description: |-
-                  If specified, API Gateway performs two-way authentication between the client
-                  and the server. Clients must present a trusted certificate to access your
-                  API.
+                description: The mutual TLS authentication configuration for a custom
+                  domain name.
                 properties:
                   truststoreURI:
                     description: A string representation of a URI with a length between
@@ -84,6 +84,7 @@ spec:
               tags:
                 additionalProperties:
                   type: string
+                description: The collection of tags associated with a domain name.
                 type: object
             required:
             - domainName
@@ -121,6 +122,7 @@ spec:
                 - region
                 type: object
               apiMappingSelectionExpression:
+                description: The API mapping selection expression.
                 type: string
               conditions:
                 description: |-

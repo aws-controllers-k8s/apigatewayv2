@@ -28,8 +28,9 @@ import (
 	ackerr "github.com/aws-controllers-k8s/runtime/pkg/errors"
 	ackrequeue "github.com/aws-controllers-k8s/runtime/pkg/requeue"
 	ackrtlog "github.com/aws-controllers-k8s/runtime/pkg/runtime/log"
-	"github.com/aws/aws-sdk-go/aws"
-	svcsdk "github.com/aws/aws-sdk-go/service/apigatewayv2"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	svcsdk "github.com/aws/aws-sdk-go-v2/service/apigatewayv2"
+	smithy "github.com/aws/smithy-go"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -40,8 +41,7 @@ import (
 var (
 	_ = &metav1.Time{}
 	_ = strings.ToLower("")
-	_ = &aws.JSONValue{}
-	_ = &svcsdk.ApiGatewayV2{}
+	_ = &svcsdk.Client{}
 	_ = &svcapitypes.Deployment{}
 	_ = ackv1alpha1.AWSAccountID("")
 	_ = &ackerr.NotFound
@@ -49,6 +49,7 @@ var (
 	_ = &reflect.Value{}
 	_ = fmt.Sprintf("")
 	_ = &ackrequeue.NoRequeue{}
+	_ = &aws.Config{}
 )
 
 // sdkFind returns SDK-specific information about a supplied resource
@@ -74,13 +75,11 @@ func (rm *resourceManager) sdkFind(
 	}
 
 	var resp *svcsdk.GetDeploymentOutput
-	resp, err = rm.sdkapi.GetDeploymentWithContext(ctx, input)
+	resp, err = rm.sdkapi.GetDeployment(ctx, input)
 	rm.metrics.RecordAPICall("READ_ONE", "GetDeployment", err)
 	if err != nil {
-		if reqErr, ok := ackerr.AWSRequestFailure(err); ok && reqErr.StatusCode() == 404 {
-			return nil, ackerr.NotFound
-		}
-		if awsErr, ok := ackerr.AWSError(err); ok && awsErr.Code() == "NotFoundException" {
+		var awsErr smithy.APIError
+		if errors.As(err, &awsErr) && awsErr.ErrorCode() == "NotFoundException" {
 			return nil, ackerr.NotFound
 		}
 		return nil, err
@@ -105,8 +104,8 @@ func (rm *resourceManager) sdkFind(
 	} else {
 		ko.Status.DeploymentID = nil
 	}
-	if resp.DeploymentStatus != nil {
-		ko.Status.DeploymentStatus = resp.DeploymentStatus
+	if resp.DeploymentStatus != "" {
+		ko.Status.DeploymentStatus = aws.String(string(resp.DeploymentStatus))
 	} else {
 		ko.Status.DeploymentStatus = nil
 	}
@@ -143,10 +142,10 @@ func (rm *resourceManager) newDescribeRequestPayload(
 	res := &svcsdk.GetDeploymentInput{}
 
 	if r.ko.Spec.APIID != nil {
-		res.SetApiId(*r.ko.Spec.APIID)
+		res.ApiId = r.ko.Spec.APIID
 	}
 	if r.ko.Status.DeploymentID != nil {
-		res.SetDeploymentId(*r.ko.Status.DeploymentID)
+		res.DeploymentId = r.ko.Status.DeploymentID
 	}
 
 	return res, nil
@@ -171,7 +170,7 @@ func (rm *resourceManager) sdkCreate(
 
 	var resp *svcsdk.CreateDeploymentOutput
 	_ = resp
-	resp, err = rm.sdkapi.CreateDeploymentWithContext(ctx, input)
+	resp, err = rm.sdkapi.CreateDeployment(ctx, input)
 	rm.metrics.RecordAPICall("CREATE", "CreateDeployment", err)
 	if err != nil {
 		return nil, err
@@ -195,8 +194,8 @@ func (rm *resourceManager) sdkCreate(
 	} else {
 		ko.Status.DeploymentID = nil
 	}
-	if resp.DeploymentStatus != nil {
-		ko.Status.DeploymentStatus = resp.DeploymentStatus
+	if resp.DeploymentStatus != "" {
+		ko.Status.DeploymentStatus = aws.String(string(resp.DeploymentStatus))
 	} else {
 		ko.Status.DeploymentStatus = nil
 	}
@@ -224,13 +223,13 @@ func (rm *resourceManager) newCreateRequestPayload(
 	res := &svcsdk.CreateDeploymentInput{}
 
 	if r.ko.Spec.APIID != nil {
-		res.SetApiId(*r.ko.Spec.APIID)
+		res.ApiId = r.ko.Spec.APIID
 	}
 	if r.ko.Spec.Description != nil {
-		res.SetDescription(*r.ko.Spec.Description)
+		res.Description = r.ko.Spec.Description
 	}
 	if r.ko.Spec.StageName != nil {
-		res.SetStageName(*r.ko.Spec.StageName)
+		res.StageName = r.ko.Spec.StageName
 	}
 
 	return res, nil
@@ -256,7 +255,7 @@ func (rm *resourceManager) sdkUpdate(
 
 	var resp *svcsdk.UpdateDeploymentOutput
 	_ = resp
-	resp, err = rm.sdkapi.UpdateDeploymentWithContext(ctx, input)
+	resp, err = rm.sdkapi.UpdateDeployment(ctx, input)
 	rm.metrics.RecordAPICall("UPDATE", "UpdateDeployment", err)
 	if err != nil {
 		return nil, err
@@ -280,8 +279,8 @@ func (rm *resourceManager) sdkUpdate(
 	} else {
 		ko.Status.DeploymentID = nil
 	}
-	if resp.DeploymentStatus != nil {
-		ko.Status.DeploymentStatus = resp.DeploymentStatus
+	if resp.DeploymentStatus != "" {
+		ko.Status.DeploymentStatus = aws.String(string(resp.DeploymentStatus))
 	} else {
 		ko.Status.DeploymentStatus = nil
 	}
@@ -310,13 +309,13 @@ func (rm *resourceManager) newUpdateRequestPayload(
 	res := &svcsdk.UpdateDeploymentInput{}
 
 	if r.ko.Spec.APIID != nil {
-		res.SetApiId(*r.ko.Spec.APIID)
+		res.ApiId = r.ko.Spec.APIID
 	}
 	if r.ko.Status.DeploymentID != nil {
-		res.SetDeploymentId(*r.ko.Status.DeploymentID)
+		res.DeploymentId = r.ko.Status.DeploymentID
 	}
 	if r.ko.Spec.Description != nil {
-		res.SetDescription(*r.ko.Spec.Description)
+		res.Description = r.ko.Spec.Description
 	}
 
 	return res, nil
@@ -338,7 +337,7 @@ func (rm *resourceManager) sdkDelete(
 	}
 	var resp *svcsdk.DeleteDeploymentOutput
 	_ = resp
-	resp, err = rm.sdkapi.DeleteDeploymentWithContext(ctx, input)
+	resp, err = rm.sdkapi.DeleteDeployment(ctx, input)
 	rm.metrics.RecordAPICall("DELETE", "DeleteDeployment", err)
 	return nil, err
 }
@@ -351,10 +350,10 @@ func (rm *resourceManager) newDeleteRequestPayload(
 	res := &svcsdk.DeleteDeploymentInput{}
 
 	if r.ko.Spec.APIID != nil {
-		res.SetApiId(*r.ko.Spec.APIID)
+		res.ApiId = r.ko.Spec.APIID
 	}
 	if r.ko.Status.DeploymentID != nil {
-		res.SetDeploymentId(*r.ko.Status.DeploymentID)
+		res.DeploymentId = r.ko.Status.DeploymentID
 	}
 
 	return res, nil

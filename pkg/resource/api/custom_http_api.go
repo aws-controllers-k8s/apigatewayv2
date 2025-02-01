@@ -6,7 +6,9 @@ import (
 
 	"github.com/aws-controllers-k8s/apigatewayv2-controller/apis/v1alpha1"
 	ackcompare "github.com/aws-controllers-k8s/runtime/pkg/compare"
-	"github.com/aws/aws-sdk-go/service/apigatewayv2"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/apigatewayv2"
+	apigatewayv2types "github.com/aws/aws-sdk-go-v2/service/apigatewayv2/types"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -135,7 +137,7 @@ func (rm *resourceManager) importApi(ctx context.Context, desired *resource) (*r
 		return nil, err
 	}
 
-	resp, respErr := rm.sdkapi.ImportApiWithContext(ctx, input)
+	resp, respErr := rm.sdkapi.ImportApi(ctx, input)
 	rm.metrics.RecordAPICall("CREATE", "ImportApi", respErr)
 	if respErr != nil {
 		return nil, respErr
@@ -161,7 +163,7 @@ func (rm *resourceManager) importApi(ctx context.Context, desired *resource) (*r
 		f9 := []*string{}
 		for _, f9iter := range resp.ImportInfo {
 			var f9elem string
-			f9elem = *f9iter
+			f9elem = f9iter
 			f9 = append(f9, &f9elem)
 		}
 		ko.Status.ImportInfo = f9
@@ -170,7 +172,7 @@ func (rm *resourceManager) importApi(ctx context.Context, desired *resource) (*r
 		f15 := []*string{}
 		for _, f15iter := range resp.Warnings {
 			var f15elem string
-			f15elem = *f15iter
+			f15elem = f15iter
 			f15 = append(f15, &f15elem)
 		}
 		ko.Status.Warnings = f15
@@ -188,7 +190,7 @@ func (rm *resourceManager) reimportApi(ctx context.Context, desired *resource) (
 		return nil, err
 	}
 
-	resp, respErr := rm.sdkapi.ReimportApiWithContext(ctx, input)
+	resp, respErr := rm.sdkapi.ReimportApi(ctx, input)
 	rm.metrics.RecordAPICall("UPDATE", "ReimportApi", respErr)
 	if respErr != nil {
 		return nil, respErr
@@ -214,7 +216,7 @@ func (rm *resourceManager) reimportApi(ctx context.Context, desired *resource) (
 		f9 := []*string{}
 		for _, f9iter := range resp.ImportInfo {
 			var f9elem string
-			f9elem = *f9iter
+			f9elem = f9iter
 			f9 = append(f9, &f9elem)
 		}
 		ko.Status.ImportInfo = f9
@@ -223,7 +225,7 @@ func (rm *resourceManager) reimportApi(ctx context.Context, desired *resource) (
 		f15 := []*string{}
 		for _, f15iter := range resp.Warnings {
 			var f15elem string
-			f15elem = *f15iter
+			f15elem = f15iter
 			f15 = append(f15, &f15elem)
 		}
 		ko.Status.Warnings = f15
@@ -241,7 +243,7 @@ func (rm *resourceManager) updateApi(ctx context.Context, desired *resource) (*r
 		return nil, err
 	}
 
-	resp, respErr := rm.sdkapi.UpdateApiWithContext(ctx, input)
+	resp, respErr := rm.sdkapi.UpdateApi(ctx, input)
 	rm.metrics.RecordAPICall("UPDATE", "UpdateApi", respErr)
 	if respErr != nil {
 		return nil, respErr
@@ -266,7 +268,7 @@ func (rm *resourceManager) updateApi(ctx context.Context, desired *resource) (*r
 		f9 := []*string{}
 		for _, f9iter := range resp.ImportInfo {
 			var f9elem string
-			f9elem = *f9iter
+			f9elem = f9iter
 			f9 = append(f9, &f9elem)
 		}
 		ko.Status.ImportInfo = f9
@@ -275,7 +277,7 @@ func (rm *resourceManager) updateApi(ctx context.Context, desired *resource) (*r
 		f15 := []*string{}
 		for _, f15iter := range resp.Warnings {
 			var f15elem string
-			f15elem = *f15iter
+			f15elem = f15iter
 			f15 = append(f15, &f15elem)
 		}
 		ko.Status.Warnings = f15
@@ -291,13 +293,13 @@ func (rm *resourceManager) updateApi(ctx context.Context, desired *resource) (*r
 func (rm *resourceManager) importApiInput(r *resource) (*apigatewayv2.ImportApiInput, error) {
 	res := &apigatewayv2.ImportApiInput{}
 	if r.ko.Spec.Body != nil {
-		res.SetBody(*r.ko.Spec.Body)
+		res.Body = r.ko.Spec.Body
 	}
 	if r.ko.Spec.Basepath != nil {
-		res.SetBasepath(*r.ko.Spec.Basepath)
+		res.Basepath = r.ko.Spec.Basepath
 	}
 	if r.ko.Spec.FailOnWarnings != nil {
-		res.SetFailOnWarnings(*r.ko.Spec.FailOnWarnings)
+		res.FailOnWarnings = r.ko.Spec.FailOnWarnings
 	}
 	return res, nil
 }
@@ -308,19 +310,19 @@ func (rm *resourceManager) reimportApiInput(r *resource) (*apigatewayv2.Reimport
 	res := &apigatewayv2.ReimportApiInput{}
 
 	if r.ko.Status.APIID != nil {
-		res.SetApiId(*r.ko.Status.APIID)
+		res.ApiId = r.ko.Status.APIID
 	} else {
 		return nil, errors.New("'APIID' is required input parameter for 'ReimportApi' operation")
 	}
 
 	if r.ko.Spec.Body != nil {
-		res.SetBody(*r.ko.Spec.Body)
+		res.Body = r.ko.Spec.Body
 	}
 	if r.ko.Spec.Basepath != nil {
-		res.SetBasepath(*r.ko.Spec.Basepath)
+		res.Basepath = r.ko.Spec.Basepath
 	}
 	if r.ko.Spec.FailOnWarnings != nil {
-		res.SetFailOnWarnings(*r.ko.Spec.FailOnWarnings)
+		res.FailOnWarnings = r.ko.Spec.FailOnWarnings
 	}
 	return res, nil
 }
@@ -333,80 +335,80 @@ func (rm *resourceManager) updateApiInput(
 	res := &apigatewayv2.UpdateApiInput{}
 
 	if r.ko.Status.APIID != nil {
-		res.SetApiId(*r.ko.Status.APIID)
+		res.ApiId = r.ko.Status.APIID
 	}
 	if r.ko.Spec.CORSConfiguration != nil {
-		f2 := &apigatewayv2.Cors{}
+		f2 := &apigatewayv2types.Cors{}
 		if r.ko.Spec.CORSConfiguration.AllowCredentials != nil {
-			f2.SetAllowCredentials(*r.ko.Spec.CORSConfiguration.AllowCredentials)
+			f2.AllowCredentials = r.ko.Spec.CORSConfiguration.AllowCredentials
 		}
 		if r.ko.Spec.CORSConfiguration.AllowHeaders != nil {
-			f2f1 := []*string{}
+			f2f1 := []string{}
 			for _, f2f1iter := range r.ko.Spec.CORSConfiguration.AllowHeaders {
 				var f2f1elem string
 				f2f1elem = *f2f1iter
-				f2f1 = append(f2f1, &f2f1elem)
+				f2f1 = append(f2f1, f2f1elem)
 			}
-			f2.SetAllowHeaders(f2f1)
+			f2.AllowHeaders = f2f1
 		}
 		if r.ko.Spec.CORSConfiguration.AllowMethods != nil {
-			f2f2 := []*string{}
+			f2f2 := []string{}
 			for _, f2f2iter := range r.ko.Spec.CORSConfiguration.AllowMethods {
 				var f2f2elem string
 				f2f2elem = *f2f2iter
-				f2f2 = append(f2f2, &f2f2elem)
+				f2f2 = append(f2f2, f2f2elem)
 			}
-			f2.SetAllowMethods(f2f2)
+			f2.AllowMethods = f2f2
 		}
 		if r.ko.Spec.CORSConfiguration.AllowOrigins != nil {
-			f2f3 := []*string{}
+			f2f3 := []string{}
 			for _, f2f3iter := range r.ko.Spec.CORSConfiguration.AllowOrigins {
 				var f2f3elem string
 				f2f3elem = *f2f3iter
-				f2f3 = append(f2f3, &f2f3elem)
+				f2f3 = append(f2f3, f2f3elem)
 			}
-			f2.SetAllowOrigins(f2f3)
+			f2.AllowOrigins = f2f3
 		}
 		if r.ko.Spec.CORSConfiguration.ExposeHeaders != nil {
-			f2f4 := []*string{}
+			f2f4 := []string{}
 			for _, f2f4iter := range r.ko.Spec.CORSConfiguration.ExposeHeaders {
 				var f2f4elem string
 				f2f4elem = *f2f4iter
-				f2f4 = append(f2f4, &f2f4elem)
+				f2f4 = append(f2f4, f2f4elem)
 			}
-			f2.SetExposeHeaders(f2f4)
+			f2.ExposeHeaders = f2f4
 		}
 		if r.ko.Spec.CORSConfiguration.MaxAge != nil {
-			f2.SetMaxAge(*r.ko.Spec.CORSConfiguration.MaxAge)
+			f2.MaxAge = aws.Int32(int32(*r.ko.Spec.CORSConfiguration.MaxAge))
 		}
-		res.SetCorsConfiguration(f2)
+		res.CorsConfiguration = f2
 	}
 	if r.ko.Spec.CredentialsARN != nil {
-		res.SetCredentialsArn(*r.ko.Spec.CredentialsARN)
+		res.CredentialsArn = r.ko.Spec.CredentialsARN
 	}
 	if r.ko.Spec.Description != nil {
-		res.SetDescription(*r.ko.Spec.Description)
+		res.Description = r.ko.Spec.Description
 	}
 	if r.ko.Spec.DisableExecuteAPIEndpoint != nil {
-		res.SetDisableExecuteApiEndpoint(*r.ko.Spec.DisableExecuteAPIEndpoint)
+		res.DisableExecuteApiEndpoint = r.ko.Spec.DisableExecuteAPIEndpoint
 	}
 	if r.ko.Spec.DisableSchemaValidation != nil {
-		res.SetDisableSchemaValidation(*r.ko.Spec.DisableSchemaValidation)
+		res.DisableSchemaValidation = r.ko.Spec.DisableSchemaValidation
 	}
 	if r.ko.Spec.Name != nil {
-		res.SetName(*r.ko.Spec.Name)
+		res.Name = r.ko.Spec.Name
 	}
 	if r.ko.Spec.RouteKey != nil {
-		res.SetRouteKey(*r.ko.Spec.RouteKey)
+		res.RouteKey = r.ko.Spec.RouteKey
 	}
 	if r.ko.Spec.RouteSelectionExpression != nil {
-		res.SetRouteSelectionExpression(*r.ko.Spec.RouteSelectionExpression)
+		res.RouteSelectionExpression = r.ko.Spec.RouteSelectionExpression
 	}
 	if r.ko.Spec.Target != nil {
-		res.SetTarget(*r.ko.Spec.Target)
+		res.Target = r.ko.Spec.Target
 	}
 	if r.ko.Spec.Version != nil {
-		res.SetVersion(*r.ko.Spec.Version)
+		res.Version = r.ko.Spec.Version
 	}
 
 	return res, nil
