@@ -25,10 +25,14 @@ import (
 // An immutable representation of an API that can be called by users. A Deployment
 // must be associated with a Stage for it to be callable over the internet.
 type DeploymentSpec struct {
-	APIID       *string                                  `json:"apiID,omitempty"`
-	APIRef      *ackv1alpha1.AWSResourceReferenceWrapper `json:"apiRef,omitempty"`
-	Description *string                                  `json:"description,omitempty"`
-	StageName   *string                                  `json:"stageName,omitempty"`
+
+	// The API identifier.
+	APIID  *string                                  `json:"apiID,omitempty"`
+	APIRef *ackv1alpha1.AWSResourceReferenceWrapper `json:"apiRef,omitempty"`
+	// The description for the deployment resource.
+	Description *string `json:"description,omitempty"`
+	// The name of the Stage resource for the Deployment resource to create.
+	StageName *string `json:"stageName,omitempty"`
 }
 
 // DeploymentStatus defines the observed state of Deployment
@@ -44,14 +48,19 @@ type DeploymentStatus struct {
 	// resource
 	// +kubebuilder:validation:Optional
 	Conditions []*ackv1alpha1.Condition `json:"conditions"`
+	// Specifies whether a deployment was automatically released.
 	// +kubebuilder:validation:Optional
 	AutoDeployed *bool `json:"autoDeployed,omitempty"`
+	// The date and time when the Deployment resource was created.
 	// +kubebuilder:validation:Optional
 	CreatedDate *metav1.Time `json:"createdDate,omitempty"`
+	// The identifier for the deployment.
 	// +kubebuilder:validation:Optional
 	DeploymentID *string `json:"deploymentID,omitempty"`
+	// The status of the deployment: PENDING, FAILED, or SUCCEEDED.
 	// +kubebuilder:validation:Optional
 	DeploymentStatus *string `json:"deploymentStatus,omitempty"`
+	// May contain additional feedback on the status of an API deployment.
 	// +kubebuilder:validation:Optional
 	DeploymentStatusMessage *string `json:"deploymentStatusMessage,omitempty"`
 }

@@ -43,8 +43,10 @@ spec:
               Represents an API mapping.
             properties:
               apiID:
+                description: The API identifier.
                 type: string
               apiMappingKey:
+                description: The API mapping key.
                 type: string
               apiRef:
                 description: "AWSResourceReferenceWrapper provides a wrapper around
@@ -64,6 +66,7 @@ spec:
                     type: object
                 type: object
               domainName:
+                description: The domain name.
                 type: string
               domainRef:
                 description: "AWSResourceReferenceWrapper provides a wrapper around
@@ -83,6 +86,7 @@ spec:
                     type: object
                 type: object
               stage:
+                description: The API stage.
                 type: string
             required:
             - stage
@@ -120,6 +124,7 @@ spec:
                 - region
                 type: object
               apiMappingID:
+                description: The API mapping identifier.
                 type: string
               conditions:
                 description: |-

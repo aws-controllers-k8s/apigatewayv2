@@ -24,20 +24,35 @@ import (
 //
 // Represents an API stage.
 type StageSpec struct {
-	AccessLogSettings    *AccessLogSettings                       `json:"accessLogSettings,omitempty"`
-	APIID                *string                                  `json:"apiID,omitempty"`
-	APIRef               *ackv1alpha1.AWSResourceReferenceWrapper `json:"apiRef,omitempty"`
-	AutoDeploy           *bool                                    `json:"autoDeploy,omitempty"`
-	ClientCertificateID  *string                                  `json:"clientCertificateID,omitempty"`
-	DefaultRouteSettings *RouteSettings                           `json:"defaultRouteSettings,omitempty"`
-	DeploymentID         *string                                  `json:"deploymentID,omitempty"`
-	DeploymentRef        *ackv1alpha1.AWSResourceReferenceWrapper `json:"deploymentRef,omitempty"`
-	Description          *string                                  `json:"description,omitempty"`
-	RouteSettings        map[string]*RouteSettings                `json:"routeSettings,omitempty"`
+
+	// Settings for logging access in this stage.
+	AccessLogSettings *AccessLogSettings `json:"accessLogSettings,omitempty"`
+	// The API identifier.
+	APIID  *string                                  `json:"apiID,omitempty"`
+	APIRef *ackv1alpha1.AWSResourceReferenceWrapper `json:"apiRef,omitempty"`
+	// Specifies whether updates to an API automatically trigger a new deployment.
+	// The default value is false.
+	AutoDeploy *bool `json:"autoDeploy,omitempty"`
+	// The identifier of a client certificate for a Stage. Supported only for WebSocket
+	// APIs.
+	ClientCertificateID *string `json:"clientCertificateID,omitempty"`
+	// The default route settings for the stage.
+	DefaultRouteSettings *RouteSettings `json:"defaultRouteSettings,omitempty"`
+	// The deployment identifier of the API stage.
+	DeploymentID  *string                                  `json:"deploymentID,omitempty"`
+	DeploymentRef *ackv1alpha1.AWSResourceReferenceWrapper `json:"deploymentRef,omitempty"`
+	// The description for the API stage.
+	Description *string `json:"description,omitempty"`
+	// Route settings for the stage, by routeKey.
+	RouteSettings map[string]*RouteSettings `json:"routeSettings,omitempty"`
+	// The name of the stage.
 	// +kubebuilder:validation:Required
-	StageName      *string            `json:"stageName"`
+	StageName *string `json:"stageName"`
+	// A map that defines the stage variables for a Stage. Variable names can have
+	// alphanumeric and underscore characters, and the values must match [A-Za-z0-9-._~:/?#&=,]+.
 	StageVariables map[string]*string `json:"stageVariables,omitempty"`
-	Tags           map[string]*string `json:"tags,omitempty"`
+	// The collection of tags. Each tag element is associated with a given resource.
+	Tags map[string]*string `json:"tags,omitempty"`
 }
 
 // StageStatus defines the observed state of Stage
@@ -53,12 +68,19 @@ type StageStatus struct {
 	// resource
 	// +kubebuilder:validation:Optional
 	Conditions []*ackv1alpha1.Condition `json:"conditions"`
+	// Specifies whether a stage is managed by API Gateway. If you created an API
+	// using quick create, the $default stage is managed by API Gateway. You can't
+	// modify the $default stage.
 	// +kubebuilder:validation:Optional
 	APIGatewayManaged *bool `json:"apiGatewayManaged,omitempty"`
+	// The timestamp when the stage was created.
 	// +kubebuilder:validation:Optional
 	CreatedDate *metav1.Time `json:"createdDate,omitempty"`
+	// Describes the status of the last deployment of a stage. Supported only for
+	// stages with autoDeploy enabled.
 	// +kubebuilder:validation:Optional
 	LastDeploymentStatusMessage *string `json:"lastDeploymentStatusMessage,omitempty"`
+	// The timestamp when the stage was last updated.
 	// +kubebuilder:validation:Optional
 	LastUpdatedDate *metav1.Time `json:"lastUpdatedDate,omitempty"`
 }

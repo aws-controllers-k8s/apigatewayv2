@@ -19,6 +19,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"reflect"
 	"strings"
 
@@ -28,8 +29,10 @@ import (
 	ackerr "github.com/aws-controllers-k8s/runtime/pkg/errors"
 	ackrequeue "github.com/aws-controllers-k8s/runtime/pkg/requeue"
 	ackrtlog "github.com/aws-controllers-k8s/runtime/pkg/runtime/log"
-	"github.com/aws/aws-sdk-go/aws"
-	svcsdk "github.com/aws/aws-sdk-go/service/apigatewayv2"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	svcsdk "github.com/aws/aws-sdk-go-v2/service/apigatewayv2"
+	svcsdktypes "github.com/aws/aws-sdk-go-v2/service/apigatewayv2/types"
+	smithy "github.com/aws/smithy-go"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -40,8 +43,7 @@ import (
 var (
 	_ = &metav1.Time{}
 	_ = strings.ToLower("")
-	_ = &aws.JSONValue{}
-	_ = &svcsdk.ApiGatewayV2{}
+	_ = &svcsdk.Client{}
 	_ = &svcapitypes.Stage{}
 	_ = ackv1alpha1.AWSAccountID("")
 	_ = &ackerr.NotFound
@@ -49,6 +51,7 @@ var (
 	_ = &reflect.Value{}
 	_ = fmt.Sprintf("")
 	_ = &ackrequeue.NoRequeue{}
+	_ = &aws.Config{}
 )
 
 // sdkFind returns SDK-specific information about a supplied resource
@@ -74,13 +77,11 @@ func (rm *resourceManager) sdkFind(
 	}
 
 	var resp *svcsdk.GetStageOutput
-	resp, err = rm.sdkapi.GetStageWithContext(ctx, input)
+	resp, err = rm.sdkapi.GetStage(ctx, input)
 	rm.metrics.RecordAPICall("READ_ONE", "GetStage", err)
 	if err != nil {
-		if reqErr, ok := ackerr.AWSRequestFailure(err); ok && reqErr.StatusCode() == 404 {
-			return nil, ackerr.NotFound
-		}
-		if awsErr, ok := ackerr.AWSError(err); ok && awsErr.Code() == "NotFoundException" {
+		var awsErr smithy.APIError
+		if errors.As(err, &awsErr) && awsErr.ErrorCode() == "NotFoundException" {
 			return nil, ackerr.NotFound
 		}
 		return nil, err
@@ -130,11 +131,12 @@ func (rm *resourceManager) sdkFind(
 		if resp.DefaultRouteSettings.DetailedMetricsEnabled != nil {
 			f5.DetailedMetricsEnabled = resp.DefaultRouteSettings.DetailedMetricsEnabled
 		}
-		if resp.DefaultRouteSettings.LoggingLevel != nil {
-			f5.LoggingLevel = resp.DefaultRouteSettings.LoggingLevel
+		if resp.DefaultRouteSettings.LoggingLevel != "" {
+			f5.LoggingLevel = aws.String(string(resp.DefaultRouteSettings.LoggingLevel))
 		}
 		if resp.DefaultRouteSettings.ThrottlingBurstLimit != nil {
-			f5.ThrottlingBurstLimit = resp.DefaultRouteSettings.ThrottlingBurstLimit
+			throttlingBurstLimitCopy := int64(*resp.DefaultRouteSettings.ThrottlingBurstLimit)
+			f5.ThrottlingBurstLimit = &throttlingBurstLimitCopy
 		}
 		if resp.DefaultRouteSettings.ThrottlingRateLimit != nil {
 			f5.ThrottlingRateLimit = resp.DefaultRouteSettings.ThrottlingRateLimit
@@ -173,11 +175,12 @@ func (rm *resourceManager) sdkFind(
 			if f10valiter.DetailedMetricsEnabled != nil {
 				f10val.DetailedMetricsEnabled = f10valiter.DetailedMetricsEnabled
 			}
-			if f10valiter.LoggingLevel != nil {
-				f10val.LoggingLevel = f10valiter.LoggingLevel
+			if f10valiter.LoggingLevel != "" {
+				f10val.LoggingLevel = aws.String(string(f10valiter.LoggingLevel))
 			}
 			if f10valiter.ThrottlingBurstLimit != nil {
-				f10val.ThrottlingBurstLimit = f10valiter.ThrottlingBurstLimit
+				throttlingBurstLimitCopy := int64(*f10valiter.ThrottlingBurstLimit)
+				f10val.ThrottlingBurstLimit = &throttlingBurstLimitCopy
 			}
 			if f10valiter.ThrottlingRateLimit != nil {
 				f10val.ThrottlingRateLimit = f10valiter.ThrottlingRateLimit
@@ -194,24 +197,12 @@ func (rm *resourceManager) sdkFind(
 		ko.Spec.StageName = nil
 	}
 	if resp.StageVariables != nil {
-		f12 := map[string]*string{}
-		for f12key, f12valiter := range resp.StageVariables {
-			var f12val string
-			f12val = *f12valiter
-			f12[f12key] = &f12val
-		}
-		ko.Spec.StageVariables = f12
+		ko.Spec.StageVariables = aws.StringMap(resp.StageVariables)
 	} else {
 		ko.Spec.StageVariables = nil
 	}
 	if resp.Tags != nil {
-		f13 := map[string]*string{}
-		for f13key, f13valiter := range resp.Tags {
-			var f13val string
-			f13val = *f13valiter
-			f13[f13key] = &f13val
-		}
-		ko.Spec.Tags = f13
+		ko.Spec.Tags = aws.StringMap(resp.Tags)
 	} else {
 		ko.Spec.Tags = nil
 	}
@@ -226,7 +217,7 @@ func (rm *resourceManager) sdkFind(
 func (rm *resourceManager) requiredFieldsMissingFromReadOneInput(
 	r *resource,
 ) bool {
-	return r.ko.Spec.StageName == nil || r.ko.Spec.APIID == nil
+	return r.ko.Spec.APIID == nil || r.ko.Spec.StageName == nil
 
 }
 
@@ -238,10 +229,10 @@ func (rm *resourceManager) newDescribeRequestPayload(
 	res := &svcsdk.GetStageInput{}
 
 	if r.ko.Spec.APIID != nil {
-		res.SetApiId(*r.ko.Spec.APIID)
+		res.ApiId = r.ko.Spec.APIID
 	}
 	if r.ko.Spec.StageName != nil {
-		res.SetStageName(*r.ko.Spec.StageName)
+		res.StageName = r.ko.Spec.StageName
 	}
 
 	return res, nil
@@ -266,7 +257,7 @@ func (rm *resourceManager) sdkCreate(
 
 	var resp *svcsdk.CreateStageOutput
 	_ = resp
-	resp, err = rm.sdkapi.CreateStageWithContext(ctx, input)
+	resp, err = rm.sdkapi.CreateStage(ctx, input)
 	rm.metrics.RecordAPICall("CREATE", "CreateStage", err)
 	if err != nil {
 		return nil, err
@@ -315,11 +306,12 @@ func (rm *resourceManager) sdkCreate(
 		if resp.DefaultRouteSettings.DetailedMetricsEnabled != nil {
 			f5.DetailedMetricsEnabled = resp.DefaultRouteSettings.DetailedMetricsEnabled
 		}
-		if resp.DefaultRouteSettings.LoggingLevel != nil {
-			f5.LoggingLevel = resp.DefaultRouteSettings.LoggingLevel
+		if resp.DefaultRouteSettings.LoggingLevel != "" {
+			f5.LoggingLevel = aws.String(string(resp.DefaultRouteSettings.LoggingLevel))
 		}
 		if resp.DefaultRouteSettings.ThrottlingBurstLimit != nil {
-			f5.ThrottlingBurstLimit = resp.DefaultRouteSettings.ThrottlingBurstLimit
+			throttlingBurstLimitCopy := int64(*resp.DefaultRouteSettings.ThrottlingBurstLimit)
+			f5.ThrottlingBurstLimit = &throttlingBurstLimitCopy
 		}
 		if resp.DefaultRouteSettings.ThrottlingRateLimit != nil {
 			f5.ThrottlingRateLimit = resp.DefaultRouteSettings.ThrottlingRateLimit
@@ -358,11 +350,12 @@ func (rm *resourceManager) sdkCreate(
 			if f10valiter.DetailedMetricsEnabled != nil {
 				f10val.DetailedMetricsEnabled = f10valiter.DetailedMetricsEnabled
 			}
-			if f10valiter.LoggingLevel != nil {
-				f10val.LoggingLevel = f10valiter.LoggingLevel
+			if f10valiter.LoggingLevel != "" {
+				f10val.LoggingLevel = aws.String(string(f10valiter.LoggingLevel))
 			}
 			if f10valiter.ThrottlingBurstLimit != nil {
-				f10val.ThrottlingBurstLimit = f10valiter.ThrottlingBurstLimit
+				throttlingBurstLimitCopy := int64(*f10valiter.ThrottlingBurstLimit)
+				f10val.ThrottlingBurstLimit = &throttlingBurstLimitCopy
 			}
 			if f10valiter.ThrottlingRateLimit != nil {
 				f10val.ThrottlingRateLimit = f10valiter.ThrottlingRateLimit
@@ -379,24 +372,12 @@ func (rm *resourceManager) sdkCreate(
 		ko.Spec.StageName = nil
 	}
 	if resp.StageVariables != nil {
-		f12 := map[string]*string{}
-		for f12key, f12valiter := range resp.StageVariables {
-			var f12val string
-			f12val = *f12valiter
-			f12[f12key] = &f12val
-		}
-		ko.Spec.StageVariables = f12
+		ko.Spec.StageVariables = aws.StringMap(resp.StageVariables)
 	} else {
 		ko.Spec.StageVariables = nil
 	}
 	if resp.Tags != nil {
-		f13 := map[string]*string{}
-		for f13key, f13valiter := range resp.Tags {
-			var f13val string
-			f13val = *f13valiter
-			f13[f13key] = &f13val
-		}
-		ko.Spec.Tags = f13
+		ko.Spec.Tags = aws.StringMap(resp.Tags)
 	} else {
 		ko.Spec.Tags = nil
 	}
@@ -414,92 +395,90 @@ func (rm *resourceManager) newCreateRequestPayload(
 	res := &svcsdk.CreateStageInput{}
 
 	if r.ko.Spec.AccessLogSettings != nil {
-		f0 := &svcsdk.AccessLogSettings{}
+		f0 := &svcsdktypes.AccessLogSettings{}
 		if r.ko.Spec.AccessLogSettings.DestinationARN != nil {
-			f0.SetDestinationArn(*r.ko.Spec.AccessLogSettings.DestinationARN)
+			f0.DestinationArn = r.ko.Spec.AccessLogSettings.DestinationARN
 		}
 		if r.ko.Spec.AccessLogSettings.Format != nil {
-			f0.SetFormat(*r.ko.Spec.AccessLogSettings.Format)
+			f0.Format = r.ko.Spec.AccessLogSettings.Format
 		}
-		res.SetAccessLogSettings(f0)
+		res.AccessLogSettings = f0
 	}
 	if r.ko.Spec.APIID != nil {
-		res.SetApiId(*r.ko.Spec.APIID)
+		res.ApiId = r.ko.Spec.APIID
 	}
 	if r.ko.Spec.AutoDeploy != nil {
-		res.SetAutoDeploy(*r.ko.Spec.AutoDeploy)
+		res.AutoDeploy = r.ko.Spec.AutoDeploy
 	}
 	if r.ko.Spec.ClientCertificateID != nil {
-		res.SetClientCertificateId(*r.ko.Spec.ClientCertificateID)
+		res.ClientCertificateId = r.ko.Spec.ClientCertificateID
 	}
 	if r.ko.Spec.DefaultRouteSettings != nil {
-		f4 := &svcsdk.RouteSettings{}
+		f4 := &svcsdktypes.RouteSettings{}
 		if r.ko.Spec.DefaultRouteSettings.DataTraceEnabled != nil {
-			f4.SetDataTraceEnabled(*r.ko.Spec.DefaultRouteSettings.DataTraceEnabled)
+			f4.DataTraceEnabled = r.ko.Spec.DefaultRouteSettings.DataTraceEnabled
 		}
 		if r.ko.Spec.DefaultRouteSettings.DetailedMetricsEnabled != nil {
-			f4.SetDetailedMetricsEnabled(*r.ko.Spec.DefaultRouteSettings.DetailedMetricsEnabled)
+			f4.DetailedMetricsEnabled = r.ko.Spec.DefaultRouteSettings.DetailedMetricsEnabled
 		}
 		if r.ko.Spec.DefaultRouteSettings.LoggingLevel != nil {
-			f4.SetLoggingLevel(*r.ko.Spec.DefaultRouteSettings.LoggingLevel)
+			f4.LoggingLevel = svcsdktypes.LoggingLevel(*r.ko.Spec.DefaultRouteSettings.LoggingLevel)
 		}
 		if r.ko.Spec.DefaultRouteSettings.ThrottlingBurstLimit != nil {
-			f4.SetThrottlingBurstLimit(*r.ko.Spec.DefaultRouteSettings.ThrottlingBurstLimit)
+			throttlingBurstLimitCopy0 := *r.ko.Spec.DefaultRouteSettings.ThrottlingBurstLimit
+			if throttlingBurstLimitCopy0 > math.MaxInt32 || throttlingBurstLimitCopy0 < math.MinInt32 {
+				return nil, fmt.Errorf("error: field ThrottlingBurstLimit is of type int32")
+			}
+			throttlingBurstLimitCopy := int32(throttlingBurstLimitCopy0)
+			f4.ThrottlingBurstLimit = &throttlingBurstLimitCopy
 		}
 		if r.ko.Spec.DefaultRouteSettings.ThrottlingRateLimit != nil {
-			f4.SetThrottlingRateLimit(*r.ko.Spec.DefaultRouteSettings.ThrottlingRateLimit)
+			f4.ThrottlingRateLimit = r.ko.Spec.DefaultRouteSettings.ThrottlingRateLimit
 		}
-		res.SetDefaultRouteSettings(f4)
+		res.DefaultRouteSettings = f4
 	}
 	if r.ko.Spec.DeploymentID != nil {
-		res.SetDeploymentId(*r.ko.Spec.DeploymentID)
+		res.DeploymentId = r.ko.Spec.DeploymentID
 	}
 	if r.ko.Spec.Description != nil {
-		res.SetDescription(*r.ko.Spec.Description)
+		res.Description = r.ko.Spec.Description
 	}
 	if r.ko.Spec.RouteSettings != nil {
-		f7 := map[string]*svcsdk.RouteSettings{}
+		f7 := map[string]svcsdktypes.RouteSettings{}
 		for f7key, f7valiter := range r.ko.Spec.RouteSettings {
-			f7val := &svcsdk.RouteSettings{}
+			f7val := &svcsdktypes.RouteSettings{}
 			if f7valiter.DataTraceEnabled != nil {
-				f7val.SetDataTraceEnabled(*f7valiter.DataTraceEnabled)
+				f7val.DataTraceEnabled = f7valiter.DataTraceEnabled
 			}
 			if f7valiter.DetailedMetricsEnabled != nil {
-				f7val.SetDetailedMetricsEnabled(*f7valiter.DetailedMetricsEnabled)
+				f7val.DetailedMetricsEnabled = f7valiter.DetailedMetricsEnabled
 			}
 			if f7valiter.LoggingLevel != nil {
-				f7val.SetLoggingLevel(*f7valiter.LoggingLevel)
+				f7val.LoggingLevel = svcsdktypes.LoggingLevel(*f7valiter.LoggingLevel)
 			}
 			if f7valiter.ThrottlingBurstLimit != nil {
-				f7val.SetThrottlingBurstLimit(*f7valiter.ThrottlingBurstLimit)
+				throttlingBurstLimitCopy0 := *f7valiter.ThrottlingBurstLimit
+				if throttlingBurstLimitCopy0 > math.MaxInt32 || throttlingBurstLimitCopy0 < math.MinInt32 {
+					return nil, fmt.Errorf("error: field ThrottlingBurstLimit is of type int32")
+				}
+				throttlingBurstLimitCopy := int32(throttlingBurstLimitCopy0)
+				f7val.ThrottlingBurstLimit = &throttlingBurstLimitCopy
 			}
 			if f7valiter.ThrottlingRateLimit != nil {
-				f7val.SetThrottlingRateLimit(*f7valiter.ThrottlingRateLimit)
+				f7val.ThrottlingRateLimit = f7valiter.ThrottlingRateLimit
 			}
-			f7[f7key] = f7val
+			f7[f7key] = *f7val
 		}
-		res.SetRouteSettings(f7)
+		res.RouteSettings = f7
 	}
 	if r.ko.Spec.StageName != nil {
-		res.SetStageName(*r.ko.Spec.StageName)
+		res.StageName = r.ko.Spec.StageName
 	}
 	if r.ko.Spec.StageVariables != nil {
-		f9 := map[string]*string{}
-		for f9key, f9valiter := range r.ko.Spec.StageVariables {
-			var f9val string
-			f9val = *f9valiter
-			f9[f9key] = &f9val
-		}
-		res.SetStageVariables(f9)
+		res.StageVariables = aws.ToStringMap(r.ko.Spec.StageVariables)
 	}
 	if r.ko.Spec.Tags != nil {
-		f10 := map[string]*string{}
-		for f10key, f10valiter := range r.ko.Spec.Tags {
-			var f10val string
-			f10val = *f10valiter
-			f10[f10key] = &f10val
-		}
-		res.SetTags(f10)
+		res.Tags = aws.ToStringMap(r.ko.Spec.Tags)
 	}
 
 	return res, nil
@@ -529,7 +508,7 @@ func (rm *resourceManager) sdkUpdate(
 
 	var resp *svcsdk.UpdateStageOutput
 	_ = resp
-	resp, err = rm.sdkapi.UpdateStageWithContext(ctx, input)
+	resp, err = rm.sdkapi.UpdateStage(ctx, input)
 	rm.metrics.RecordAPICall("UPDATE", "UpdateStage", err)
 	if err != nil {
 		return nil, err
@@ -578,11 +557,12 @@ func (rm *resourceManager) sdkUpdate(
 		if resp.DefaultRouteSettings.DetailedMetricsEnabled != nil {
 			f5.DetailedMetricsEnabled = resp.DefaultRouteSettings.DetailedMetricsEnabled
 		}
-		if resp.DefaultRouteSettings.LoggingLevel != nil {
-			f5.LoggingLevel = resp.DefaultRouteSettings.LoggingLevel
+		if resp.DefaultRouteSettings.LoggingLevel != "" {
+			f5.LoggingLevel = aws.String(string(resp.DefaultRouteSettings.LoggingLevel))
 		}
 		if resp.DefaultRouteSettings.ThrottlingBurstLimit != nil {
-			f5.ThrottlingBurstLimit = resp.DefaultRouteSettings.ThrottlingBurstLimit
+			throttlingBurstLimitCopy := int64(*resp.DefaultRouteSettings.ThrottlingBurstLimit)
+			f5.ThrottlingBurstLimit = &throttlingBurstLimitCopy
 		}
 		if resp.DefaultRouteSettings.ThrottlingRateLimit != nil {
 			f5.ThrottlingRateLimit = resp.DefaultRouteSettings.ThrottlingRateLimit
@@ -621,11 +601,12 @@ func (rm *resourceManager) sdkUpdate(
 			if f10valiter.DetailedMetricsEnabled != nil {
 				f10val.DetailedMetricsEnabled = f10valiter.DetailedMetricsEnabled
 			}
-			if f10valiter.LoggingLevel != nil {
-				f10val.LoggingLevel = f10valiter.LoggingLevel
+			if f10valiter.LoggingLevel != "" {
+				f10val.LoggingLevel = aws.String(string(f10valiter.LoggingLevel))
 			}
 			if f10valiter.ThrottlingBurstLimit != nil {
-				f10val.ThrottlingBurstLimit = f10valiter.ThrottlingBurstLimit
+				throttlingBurstLimitCopy := int64(*f10valiter.ThrottlingBurstLimit)
+				f10val.ThrottlingBurstLimit = &throttlingBurstLimitCopy
 			}
 			if f10valiter.ThrottlingRateLimit != nil {
 				f10val.ThrottlingRateLimit = f10valiter.ThrottlingRateLimit
@@ -642,24 +623,12 @@ func (rm *resourceManager) sdkUpdate(
 		ko.Spec.StageName = nil
 	}
 	if resp.StageVariables != nil {
-		f12 := map[string]*string{}
-		for f12key, f12valiter := range resp.StageVariables {
-			var f12val string
-			f12val = *f12valiter
-			f12[f12key] = &f12val
-		}
-		ko.Spec.StageVariables = f12
+		ko.Spec.StageVariables = aws.StringMap(resp.StageVariables)
 	} else {
 		ko.Spec.StageVariables = nil
 	}
 	if resp.Tags != nil {
-		f13 := map[string]*string{}
-		for f13key, f13valiter := range resp.Tags {
-			var f13val string
-			f13val = *f13valiter
-			f13[f13key] = &f13val
-		}
-		ko.Spec.Tags = f13
+		ko.Spec.Tags = aws.StringMap(resp.Tags)
 	} else {
 		ko.Spec.Tags = nil
 	}
@@ -678,83 +647,87 @@ func (rm *resourceManager) newUpdateRequestPayload(
 	res := &svcsdk.UpdateStageInput{}
 
 	if r.ko.Spec.AccessLogSettings != nil {
-		f0 := &svcsdk.AccessLogSettings{}
+		f0 := &svcsdktypes.AccessLogSettings{}
 		if r.ko.Spec.AccessLogSettings.DestinationARN != nil {
-			f0.SetDestinationArn(*r.ko.Spec.AccessLogSettings.DestinationARN)
+			f0.DestinationArn = r.ko.Spec.AccessLogSettings.DestinationARN
 		}
 		if r.ko.Spec.AccessLogSettings.Format != nil {
-			f0.SetFormat(*r.ko.Spec.AccessLogSettings.Format)
+			f0.Format = r.ko.Spec.AccessLogSettings.Format
 		}
-		res.SetAccessLogSettings(f0)
+		res.AccessLogSettings = f0
 	}
 	if r.ko.Spec.APIID != nil {
-		res.SetApiId(*r.ko.Spec.APIID)
+		res.ApiId = r.ko.Spec.APIID
 	}
 	if r.ko.Spec.AutoDeploy != nil {
-		res.SetAutoDeploy(*r.ko.Spec.AutoDeploy)
+		res.AutoDeploy = r.ko.Spec.AutoDeploy
 	}
 	if r.ko.Spec.ClientCertificateID != nil {
-		res.SetClientCertificateId(*r.ko.Spec.ClientCertificateID)
+		res.ClientCertificateId = r.ko.Spec.ClientCertificateID
 	}
 	if r.ko.Spec.DefaultRouteSettings != nil {
-		f4 := &svcsdk.RouteSettings{}
+		f4 := &svcsdktypes.RouteSettings{}
 		if r.ko.Spec.DefaultRouteSettings.DataTraceEnabled != nil {
-			f4.SetDataTraceEnabled(*r.ko.Spec.DefaultRouteSettings.DataTraceEnabled)
+			f4.DataTraceEnabled = r.ko.Spec.DefaultRouteSettings.DataTraceEnabled
 		}
 		if r.ko.Spec.DefaultRouteSettings.DetailedMetricsEnabled != nil {
-			f4.SetDetailedMetricsEnabled(*r.ko.Spec.DefaultRouteSettings.DetailedMetricsEnabled)
+			f4.DetailedMetricsEnabled = r.ko.Spec.DefaultRouteSettings.DetailedMetricsEnabled
 		}
 		if r.ko.Spec.DefaultRouteSettings.LoggingLevel != nil {
-			f4.SetLoggingLevel(*r.ko.Spec.DefaultRouteSettings.LoggingLevel)
+			f4.LoggingLevel = svcsdktypes.LoggingLevel(*r.ko.Spec.DefaultRouteSettings.LoggingLevel)
 		}
 		if r.ko.Spec.DefaultRouteSettings.ThrottlingBurstLimit != nil {
-			f4.SetThrottlingBurstLimit(*r.ko.Spec.DefaultRouteSettings.ThrottlingBurstLimit)
+			throttlingBurstLimitCopy0 := *r.ko.Spec.DefaultRouteSettings.ThrottlingBurstLimit
+			if throttlingBurstLimitCopy0 > math.MaxInt32 || throttlingBurstLimitCopy0 < math.MinInt32 {
+				return nil, fmt.Errorf("error: field ThrottlingBurstLimit is of type int32")
+			}
+			throttlingBurstLimitCopy := int32(throttlingBurstLimitCopy0)
+			f4.ThrottlingBurstLimit = &throttlingBurstLimitCopy
 		}
 		if r.ko.Spec.DefaultRouteSettings.ThrottlingRateLimit != nil {
-			f4.SetThrottlingRateLimit(*r.ko.Spec.DefaultRouteSettings.ThrottlingRateLimit)
+			f4.ThrottlingRateLimit = r.ko.Spec.DefaultRouteSettings.ThrottlingRateLimit
 		}
-		res.SetDefaultRouteSettings(f4)
+		res.DefaultRouteSettings = f4
 	}
 	if r.ko.Spec.DeploymentID != nil {
-		res.SetDeploymentId(*r.ko.Spec.DeploymentID)
+		res.DeploymentId = r.ko.Spec.DeploymentID
 	}
 	if r.ko.Spec.Description != nil {
-		res.SetDescription(*r.ko.Spec.Description)
+		res.Description = r.ko.Spec.Description
 	}
 	if r.ko.Spec.RouteSettings != nil {
-		f7 := map[string]*svcsdk.RouteSettings{}
+		f7 := map[string]svcsdktypes.RouteSettings{}
 		for f7key, f7valiter := range r.ko.Spec.RouteSettings {
-			f7val := &svcsdk.RouteSettings{}
+			f7val := &svcsdktypes.RouteSettings{}
 			if f7valiter.DataTraceEnabled != nil {
-				f7val.SetDataTraceEnabled(*f7valiter.DataTraceEnabled)
+				f7val.DataTraceEnabled = f7valiter.DataTraceEnabled
 			}
 			if f7valiter.DetailedMetricsEnabled != nil {
-				f7val.SetDetailedMetricsEnabled(*f7valiter.DetailedMetricsEnabled)
+				f7val.DetailedMetricsEnabled = f7valiter.DetailedMetricsEnabled
 			}
 			if f7valiter.LoggingLevel != nil {
-				f7val.SetLoggingLevel(*f7valiter.LoggingLevel)
+				f7val.LoggingLevel = svcsdktypes.LoggingLevel(*f7valiter.LoggingLevel)
 			}
 			if f7valiter.ThrottlingBurstLimit != nil {
-				f7val.SetThrottlingBurstLimit(*f7valiter.ThrottlingBurstLimit)
+				throttlingBurstLimitCopy0 := *f7valiter.ThrottlingBurstLimit
+				if throttlingBurstLimitCopy0 > math.MaxInt32 || throttlingBurstLimitCopy0 < math.MinInt32 {
+					return nil, fmt.Errorf("error: field ThrottlingBurstLimit is of type int32")
+				}
+				throttlingBurstLimitCopy := int32(throttlingBurstLimitCopy0)
+				f7val.ThrottlingBurstLimit = &throttlingBurstLimitCopy
 			}
 			if f7valiter.ThrottlingRateLimit != nil {
-				f7val.SetThrottlingRateLimit(*f7valiter.ThrottlingRateLimit)
+				f7val.ThrottlingRateLimit = f7valiter.ThrottlingRateLimit
 			}
-			f7[f7key] = f7val
+			f7[f7key] = *f7val
 		}
-		res.SetRouteSettings(f7)
+		res.RouteSettings = f7
 	}
 	if r.ko.Spec.StageName != nil {
-		res.SetStageName(*r.ko.Spec.StageName)
+		res.StageName = r.ko.Spec.StageName
 	}
 	if r.ko.Spec.StageVariables != nil {
-		f9 := map[string]*string{}
-		for f9key, f9valiter := range r.ko.Spec.StageVariables {
-			var f9val string
-			f9val = *f9valiter
-			f9[f9key] = &f9val
-		}
-		res.SetStageVariables(f9)
+		res.StageVariables = aws.ToStringMap(r.ko.Spec.StageVariables)
 	}
 
 	return res, nil
@@ -776,7 +749,7 @@ func (rm *resourceManager) sdkDelete(
 	}
 	var resp *svcsdk.DeleteStageOutput
 	_ = resp
-	resp, err = rm.sdkapi.DeleteStageWithContext(ctx, input)
+	resp, err = rm.sdkapi.DeleteStage(ctx, input)
 	rm.metrics.RecordAPICall("DELETE", "DeleteStage", err)
 	return nil, err
 }
@@ -789,10 +762,10 @@ func (rm *resourceManager) newDeleteRequestPayload(
 	res := &svcsdk.DeleteStageInput{}
 
 	if r.ko.Spec.APIID != nil {
-		res.SetApiId(*r.ko.Spec.APIID)
+		res.ApiId = r.ko.Spec.APIID
 	}
 	if r.ko.Spec.StageName != nil {
-		res.SetStageName(*r.ko.Spec.StageName)
+		res.StageName = r.ko.Spec.StageName
 	}
 
 	return res, nil

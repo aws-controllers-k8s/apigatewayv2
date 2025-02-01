@@ -28,8 +28,9 @@ import (
 	ackerr "github.com/aws-controllers-k8s/runtime/pkg/errors"
 	ackrequeue "github.com/aws-controllers-k8s/runtime/pkg/requeue"
 	ackrtlog "github.com/aws-controllers-k8s/runtime/pkg/runtime/log"
-	"github.com/aws/aws-sdk-go/aws"
-	svcsdk "github.com/aws/aws-sdk-go/service/apigatewayv2"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	svcsdk "github.com/aws/aws-sdk-go-v2/service/apigatewayv2"
+	smithy "github.com/aws/smithy-go"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -40,8 +41,7 @@ import (
 var (
 	_ = &metav1.Time{}
 	_ = strings.ToLower("")
-	_ = &aws.JSONValue{}
-	_ = &svcsdk.ApiGatewayV2{}
+	_ = &svcsdk.Client{}
 	_ = &svcapitypes.APIMapping{}
 	_ = ackv1alpha1.AWSAccountID("")
 	_ = &ackerr.NotFound
@@ -49,6 +49,7 @@ var (
 	_ = &reflect.Value{}
 	_ = fmt.Sprintf("")
 	_ = &ackrequeue.NoRequeue{}
+	_ = &aws.Config{}
 )
 
 // sdkFind returns SDK-specific information about a supplied resource
@@ -74,13 +75,11 @@ func (rm *resourceManager) sdkFind(
 	}
 
 	var resp *svcsdk.GetApiMappingOutput
-	resp, err = rm.sdkapi.GetApiMappingWithContext(ctx, input)
+	resp, err = rm.sdkapi.GetApiMapping(ctx, input)
 	rm.metrics.RecordAPICall("READ_ONE", "GetApiMapping", err)
 	if err != nil {
-		if reqErr, ok := ackerr.AWSRequestFailure(err); ok && reqErr.StatusCode() == 404 {
-			return nil, ackerr.NotFound
-		}
-		if awsErr, ok := ackerr.AWSError(err); ok && awsErr.Code() == "NotFoundException" {
+		var awsErr smithy.APIError
+		if errors.As(err, &awsErr) && awsErr.ErrorCode() == "NotFoundException" {
 			return nil, ackerr.NotFound
 		}
 		return nil, err
@@ -133,10 +132,10 @@ func (rm *resourceManager) newDescribeRequestPayload(
 	res := &svcsdk.GetApiMappingInput{}
 
 	if r.ko.Status.APIMappingID != nil {
-		res.SetApiMappingId(*r.ko.Status.APIMappingID)
+		res.ApiMappingId = r.ko.Status.APIMappingID
 	}
 	if r.ko.Spec.DomainName != nil {
-		res.SetDomainName(*r.ko.Spec.DomainName)
+		res.DomainName = r.ko.Spec.DomainName
 	}
 
 	return res, nil
@@ -161,7 +160,7 @@ func (rm *resourceManager) sdkCreate(
 
 	var resp *svcsdk.CreateApiMappingOutput
 	_ = resp
-	resp, err = rm.sdkapi.CreateApiMappingWithContext(ctx, input)
+	resp, err = rm.sdkapi.CreateApiMapping(ctx, input)
 	rm.metrics.RecordAPICall("CREATE", "CreateApiMapping", err)
 	if err != nil {
 		return nil, err
@@ -204,16 +203,16 @@ func (rm *resourceManager) newCreateRequestPayload(
 	res := &svcsdk.CreateApiMappingInput{}
 
 	if r.ko.Spec.APIID != nil {
-		res.SetApiId(*r.ko.Spec.APIID)
+		res.ApiId = r.ko.Spec.APIID
 	}
 	if r.ko.Spec.APIMappingKey != nil {
-		res.SetApiMappingKey(*r.ko.Spec.APIMappingKey)
+		res.ApiMappingKey = r.ko.Spec.APIMappingKey
 	}
 	if r.ko.Spec.DomainName != nil {
-		res.SetDomainName(*r.ko.Spec.DomainName)
+		res.DomainName = r.ko.Spec.DomainName
 	}
 	if r.ko.Spec.Stage != nil {
-		res.SetStage(*r.ko.Spec.Stage)
+		res.Stage = r.ko.Spec.Stage
 	}
 
 	return res, nil
@@ -239,7 +238,7 @@ func (rm *resourceManager) sdkUpdate(
 
 	var resp *svcsdk.UpdateApiMappingOutput
 	_ = resp
-	resp, err = rm.sdkapi.UpdateApiMappingWithContext(ctx, input)
+	resp, err = rm.sdkapi.UpdateApiMapping(ctx, input)
 	rm.metrics.RecordAPICall("UPDATE", "UpdateApiMapping", err)
 	if err != nil {
 		return nil, err
@@ -283,19 +282,19 @@ func (rm *resourceManager) newUpdateRequestPayload(
 	res := &svcsdk.UpdateApiMappingInput{}
 
 	if r.ko.Spec.APIID != nil {
-		res.SetApiId(*r.ko.Spec.APIID)
+		res.ApiId = r.ko.Spec.APIID
 	}
 	if r.ko.Status.APIMappingID != nil {
-		res.SetApiMappingId(*r.ko.Status.APIMappingID)
+		res.ApiMappingId = r.ko.Status.APIMappingID
 	}
 	if r.ko.Spec.APIMappingKey != nil {
-		res.SetApiMappingKey(*r.ko.Spec.APIMappingKey)
+		res.ApiMappingKey = r.ko.Spec.APIMappingKey
 	}
 	if r.ko.Spec.DomainName != nil {
-		res.SetDomainName(*r.ko.Spec.DomainName)
+		res.DomainName = r.ko.Spec.DomainName
 	}
 	if r.ko.Spec.Stage != nil {
-		res.SetStage(*r.ko.Spec.Stage)
+		res.Stage = r.ko.Spec.Stage
 	}
 
 	return res, nil
@@ -317,7 +316,7 @@ func (rm *resourceManager) sdkDelete(
 	}
 	var resp *svcsdk.DeleteApiMappingOutput
 	_ = resp
-	resp, err = rm.sdkapi.DeleteApiMappingWithContext(ctx, input)
+	resp, err = rm.sdkapi.DeleteApiMapping(ctx, input)
 	rm.metrics.RecordAPICall("DELETE", "DeleteApiMapping", err)
 	return nil, err
 }
@@ -330,10 +329,10 @@ func (rm *resourceManager) newDeleteRequestPayload(
 	res := &svcsdk.DeleteApiMappingInput{}
 
 	if r.ko.Status.APIMappingID != nil {
-		res.SetApiMappingId(*r.ko.Status.APIMappingID)
+		res.ApiMappingId = r.ko.Status.APIMappingID
 	}
 	if r.ko.Spec.DomainName != nil {
-		res.SetDomainName(*r.ko.Spec.DomainName)
+		res.DomainName = r.ko.Spec.DomainName
 	}
 
 	return res, nil
@@ -441,11 +440,12 @@ func (rm *resourceManager) terminalAWSError(err error) bool {
 	if err == nil {
 		return false
 	}
-	awsErr, ok := ackerr.AWSError(err)
-	if !ok {
+
+	var terminalErr smithy.APIError
+	if !errors.As(err, &terminalErr) {
 		return false
 	}
-	switch awsErr.Code() {
+	switch terminalErr.ErrorCode() {
 	case "BadRequestException":
 		return true
 	default:

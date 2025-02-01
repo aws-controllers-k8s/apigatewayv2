@@ -28,8 +28,10 @@ import (
 	ackerr "github.com/aws-controllers-k8s/runtime/pkg/errors"
 	ackrequeue "github.com/aws-controllers-k8s/runtime/pkg/requeue"
 	ackrtlog "github.com/aws-controllers-k8s/runtime/pkg/runtime/log"
-	"github.com/aws/aws-sdk-go/aws"
-	svcsdk "github.com/aws/aws-sdk-go/service/apigatewayv2"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	svcsdk "github.com/aws/aws-sdk-go-v2/service/apigatewayv2"
+	svcsdktypes "github.com/aws/aws-sdk-go-v2/service/apigatewayv2/types"
+	smithy "github.com/aws/smithy-go"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -40,8 +42,7 @@ import (
 var (
 	_ = &metav1.Time{}
 	_ = strings.ToLower("")
-	_ = &aws.JSONValue{}
-	_ = &svcsdk.ApiGatewayV2{}
+	_ = &svcsdk.Client{}
 	_ = &svcapitypes.Route{}
 	_ = ackv1alpha1.AWSAccountID("")
 	_ = &ackerr.NotFound
@@ -49,6 +50,7 @@ var (
 	_ = &reflect.Value{}
 	_ = fmt.Sprintf("")
 	_ = &ackrequeue.NoRequeue{}
+	_ = &aws.Config{}
 )
 
 // sdkFind returns SDK-specific information about a supplied resource
@@ -74,13 +76,11 @@ func (rm *resourceManager) sdkFind(
 	}
 
 	var resp *svcsdk.GetRouteOutput
-	resp, err = rm.sdkapi.GetRouteWithContext(ctx, input)
+	resp, err = rm.sdkapi.GetRoute(ctx, input)
 	rm.metrics.RecordAPICall("READ_ONE", "GetRoute", err)
 	if err != nil {
-		if reqErr, ok := ackerr.AWSRequestFailure(err); ok && reqErr.StatusCode() == 404 {
-			return nil, ackerr.NotFound
-		}
-		if awsErr, ok := ackerr.AWSError(err); ok && awsErr.Code() == "NotFoundException" {
+		var awsErr smithy.APIError
+		if errors.As(err, &awsErr) && awsErr.ErrorCode() == "NotFoundException" {
 			return nil, ackerr.NotFound
 		}
 		return nil, err
@@ -101,18 +101,12 @@ func (rm *resourceManager) sdkFind(
 		ko.Spec.APIKeyRequired = nil
 	}
 	if resp.AuthorizationScopes != nil {
-		f2 := []*string{}
-		for _, f2iter := range resp.AuthorizationScopes {
-			var f2elem string
-			f2elem = *f2iter
-			f2 = append(f2, &f2elem)
-		}
-		ko.Spec.AuthorizationScopes = f2
+		ko.Spec.AuthorizationScopes = aws.StringSlice(resp.AuthorizationScopes)
 	} else {
 		ko.Spec.AuthorizationScopes = nil
 	}
-	if resp.AuthorizationType != nil {
-		ko.Spec.AuthorizationType = resp.AuthorizationType
+	if resp.AuthorizationType != "" {
+		ko.Spec.AuthorizationType = aws.String(string(resp.AuthorizationType))
 	} else {
 		ko.Spec.AuthorizationType = nil
 	}
@@ -132,13 +126,7 @@ func (rm *resourceManager) sdkFind(
 		ko.Spec.OperationName = nil
 	}
 	if resp.RequestModels != nil {
-		f7 := map[string]*string{}
-		for f7key, f7valiter := range resp.RequestModels {
-			var f7val string
-			f7val = *f7valiter
-			f7[f7key] = &f7val
-		}
-		ko.Spec.RequestModels = f7
+		ko.Spec.RequestModels = aws.StringMap(resp.RequestModels)
 	} else {
 		ko.Spec.RequestModels = nil
 	}
@@ -198,10 +186,10 @@ func (rm *resourceManager) newDescribeRequestPayload(
 	res := &svcsdk.GetRouteInput{}
 
 	if r.ko.Spec.APIID != nil {
-		res.SetApiId(*r.ko.Spec.APIID)
+		res.ApiId = r.ko.Spec.APIID
 	}
 	if r.ko.Status.RouteID != nil {
-		res.SetRouteId(*r.ko.Status.RouteID)
+		res.RouteId = r.ko.Status.RouteID
 	}
 
 	return res, nil
@@ -226,7 +214,7 @@ func (rm *resourceManager) sdkCreate(
 
 	var resp *svcsdk.CreateRouteOutput
 	_ = resp
-	resp, err = rm.sdkapi.CreateRouteWithContext(ctx, input)
+	resp, err = rm.sdkapi.CreateRoute(ctx, input)
 	rm.metrics.RecordAPICall("CREATE", "CreateRoute", err)
 	if err != nil {
 		return nil, err
@@ -246,18 +234,12 @@ func (rm *resourceManager) sdkCreate(
 		ko.Spec.APIKeyRequired = nil
 	}
 	if resp.AuthorizationScopes != nil {
-		f2 := []*string{}
-		for _, f2iter := range resp.AuthorizationScopes {
-			var f2elem string
-			f2elem = *f2iter
-			f2 = append(f2, &f2elem)
-		}
-		ko.Spec.AuthorizationScopes = f2
+		ko.Spec.AuthorizationScopes = aws.StringSlice(resp.AuthorizationScopes)
 	} else {
 		ko.Spec.AuthorizationScopes = nil
 	}
-	if resp.AuthorizationType != nil {
-		ko.Spec.AuthorizationType = resp.AuthorizationType
+	if resp.AuthorizationType != "" {
+		ko.Spec.AuthorizationType = aws.String(string(resp.AuthorizationType))
 	} else {
 		ko.Spec.AuthorizationType = nil
 	}
@@ -277,13 +259,7 @@ func (rm *resourceManager) sdkCreate(
 		ko.Spec.OperationName = nil
 	}
 	if resp.RequestModels != nil {
-		f7 := map[string]*string{}
-		for f7key, f7valiter := range resp.RequestModels {
-			var f7val string
-			f7val = *f7valiter
-			f7[f7key] = &f7val
-		}
-		ko.Spec.RequestModels = f7
+		ko.Spec.RequestModels = aws.StringMap(resp.RequestModels)
 	} else {
 		ko.Spec.RequestModels = nil
 	}
@@ -334,60 +310,48 @@ func (rm *resourceManager) newCreateRequestPayload(
 	res := &svcsdk.CreateRouteInput{}
 
 	if r.ko.Spec.APIID != nil {
-		res.SetApiId(*r.ko.Spec.APIID)
+		res.ApiId = r.ko.Spec.APIID
 	}
 	if r.ko.Spec.APIKeyRequired != nil {
-		res.SetApiKeyRequired(*r.ko.Spec.APIKeyRequired)
+		res.ApiKeyRequired = r.ko.Spec.APIKeyRequired
 	}
 	if r.ko.Spec.AuthorizationScopes != nil {
-		f2 := []*string{}
-		for _, f2iter := range r.ko.Spec.AuthorizationScopes {
-			var f2elem string
-			f2elem = *f2iter
-			f2 = append(f2, &f2elem)
-		}
-		res.SetAuthorizationScopes(f2)
+		res.AuthorizationScopes = aws.ToStringSlice(r.ko.Spec.AuthorizationScopes)
 	}
 	if r.ko.Spec.AuthorizationType != nil {
-		res.SetAuthorizationType(*r.ko.Spec.AuthorizationType)
+		res.AuthorizationType = svcsdktypes.AuthorizationType(*r.ko.Spec.AuthorizationType)
 	}
 	if r.ko.Spec.AuthorizerID != nil {
-		res.SetAuthorizerId(*r.ko.Spec.AuthorizerID)
+		res.AuthorizerId = r.ko.Spec.AuthorizerID
 	}
 	if r.ko.Spec.ModelSelectionExpression != nil {
-		res.SetModelSelectionExpression(*r.ko.Spec.ModelSelectionExpression)
+		res.ModelSelectionExpression = r.ko.Spec.ModelSelectionExpression
 	}
 	if r.ko.Spec.OperationName != nil {
-		res.SetOperationName(*r.ko.Spec.OperationName)
+		res.OperationName = r.ko.Spec.OperationName
 	}
 	if r.ko.Spec.RequestModels != nil {
-		f7 := map[string]*string{}
-		for f7key, f7valiter := range r.ko.Spec.RequestModels {
-			var f7val string
-			f7val = *f7valiter
-			f7[f7key] = &f7val
-		}
-		res.SetRequestModels(f7)
+		res.RequestModels = aws.ToStringMap(r.ko.Spec.RequestModels)
 	}
 	if r.ko.Spec.RequestParameters != nil {
-		f8 := map[string]*svcsdk.ParameterConstraints{}
+		f8 := map[string]svcsdktypes.ParameterConstraints{}
 		for f8key, f8valiter := range r.ko.Spec.RequestParameters {
-			f8val := &svcsdk.ParameterConstraints{}
+			f8val := &svcsdktypes.ParameterConstraints{}
 			if f8valiter.Required != nil {
-				f8val.SetRequired(*f8valiter.Required)
+				f8val.Required = f8valiter.Required
 			}
-			f8[f8key] = f8val
+			f8[f8key] = *f8val
 		}
-		res.SetRequestParameters(f8)
+		res.RequestParameters = f8
 	}
 	if r.ko.Spec.RouteKey != nil {
-		res.SetRouteKey(*r.ko.Spec.RouteKey)
+		res.RouteKey = r.ko.Spec.RouteKey
 	}
 	if r.ko.Spec.RouteResponseSelectionExpression != nil {
-		res.SetRouteResponseSelectionExpression(*r.ko.Spec.RouteResponseSelectionExpression)
+		res.RouteResponseSelectionExpression = r.ko.Spec.RouteResponseSelectionExpression
 	}
 	if r.ko.Spec.Target != nil {
-		res.SetTarget(*r.ko.Spec.Target)
+		res.Target = r.ko.Spec.Target
 	}
 
 	return res, nil
@@ -413,7 +377,7 @@ func (rm *resourceManager) sdkUpdate(
 
 	var resp *svcsdk.UpdateRouteOutput
 	_ = resp
-	resp, err = rm.sdkapi.UpdateRouteWithContext(ctx, input)
+	resp, err = rm.sdkapi.UpdateRoute(ctx, input)
 	rm.metrics.RecordAPICall("UPDATE", "UpdateRoute", err)
 	if err != nil {
 		return nil, err
@@ -433,18 +397,12 @@ func (rm *resourceManager) sdkUpdate(
 		ko.Spec.APIKeyRequired = nil
 	}
 	if resp.AuthorizationScopes != nil {
-		f2 := []*string{}
-		for _, f2iter := range resp.AuthorizationScopes {
-			var f2elem string
-			f2elem = *f2iter
-			f2 = append(f2, &f2elem)
-		}
-		ko.Spec.AuthorizationScopes = f2
+		ko.Spec.AuthorizationScopes = aws.StringSlice(resp.AuthorizationScopes)
 	} else {
 		ko.Spec.AuthorizationScopes = nil
 	}
-	if resp.AuthorizationType != nil {
-		ko.Spec.AuthorizationType = resp.AuthorizationType
+	if resp.AuthorizationType != "" {
+		ko.Spec.AuthorizationType = aws.String(string(resp.AuthorizationType))
 	} else {
 		ko.Spec.AuthorizationType = nil
 	}
@@ -464,13 +422,7 @@ func (rm *resourceManager) sdkUpdate(
 		ko.Spec.OperationName = nil
 	}
 	if resp.RequestModels != nil {
-		f7 := map[string]*string{}
-		for f7key, f7valiter := range resp.RequestModels {
-			var f7val string
-			f7val = *f7valiter
-			f7[f7key] = &f7val
-		}
-		ko.Spec.RequestModels = f7
+		ko.Spec.RequestModels = aws.StringMap(resp.RequestModels)
 	} else {
 		ko.Spec.RequestModels = nil
 	}
@@ -522,63 +474,51 @@ func (rm *resourceManager) newUpdateRequestPayload(
 	res := &svcsdk.UpdateRouteInput{}
 
 	if r.ko.Spec.APIID != nil {
-		res.SetApiId(*r.ko.Spec.APIID)
+		res.ApiId = r.ko.Spec.APIID
 	}
 	if r.ko.Spec.APIKeyRequired != nil {
-		res.SetApiKeyRequired(*r.ko.Spec.APIKeyRequired)
+		res.ApiKeyRequired = r.ko.Spec.APIKeyRequired
 	}
 	if r.ko.Spec.AuthorizationScopes != nil {
-		f2 := []*string{}
-		for _, f2iter := range r.ko.Spec.AuthorizationScopes {
-			var f2elem string
-			f2elem = *f2iter
-			f2 = append(f2, &f2elem)
-		}
-		res.SetAuthorizationScopes(f2)
+		res.AuthorizationScopes = aws.ToStringSlice(r.ko.Spec.AuthorizationScopes)
 	}
 	if r.ko.Spec.AuthorizationType != nil {
-		res.SetAuthorizationType(*r.ko.Spec.AuthorizationType)
+		res.AuthorizationType = svcsdktypes.AuthorizationType(*r.ko.Spec.AuthorizationType)
 	}
 	if r.ko.Spec.AuthorizerID != nil {
-		res.SetAuthorizerId(*r.ko.Spec.AuthorizerID)
+		res.AuthorizerId = r.ko.Spec.AuthorizerID
 	}
 	if r.ko.Spec.ModelSelectionExpression != nil {
-		res.SetModelSelectionExpression(*r.ko.Spec.ModelSelectionExpression)
+		res.ModelSelectionExpression = r.ko.Spec.ModelSelectionExpression
 	}
 	if r.ko.Spec.OperationName != nil {
-		res.SetOperationName(*r.ko.Spec.OperationName)
+		res.OperationName = r.ko.Spec.OperationName
 	}
 	if r.ko.Spec.RequestModels != nil {
-		f7 := map[string]*string{}
-		for f7key, f7valiter := range r.ko.Spec.RequestModels {
-			var f7val string
-			f7val = *f7valiter
-			f7[f7key] = &f7val
-		}
-		res.SetRequestModels(f7)
+		res.RequestModels = aws.ToStringMap(r.ko.Spec.RequestModels)
 	}
 	if r.ko.Spec.RequestParameters != nil {
-		f8 := map[string]*svcsdk.ParameterConstraints{}
+		f8 := map[string]svcsdktypes.ParameterConstraints{}
 		for f8key, f8valiter := range r.ko.Spec.RequestParameters {
-			f8val := &svcsdk.ParameterConstraints{}
+			f8val := &svcsdktypes.ParameterConstraints{}
 			if f8valiter.Required != nil {
-				f8val.SetRequired(*f8valiter.Required)
+				f8val.Required = f8valiter.Required
 			}
-			f8[f8key] = f8val
+			f8[f8key] = *f8val
 		}
-		res.SetRequestParameters(f8)
+		res.RequestParameters = f8
 	}
 	if r.ko.Status.RouteID != nil {
-		res.SetRouteId(*r.ko.Status.RouteID)
+		res.RouteId = r.ko.Status.RouteID
 	}
 	if r.ko.Spec.RouteKey != nil {
-		res.SetRouteKey(*r.ko.Spec.RouteKey)
+		res.RouteKey = r.ko.Spec.RouteKey
 	}
 	if r.ko.Spec.RouteResponseSelectionExpression != nil {
-		res.SetRouteResponseSelectionExpression(*r.ko.Spec.RouteResponseSelectionExpression)
+		res.RouteResponseSelectionExpression = r.ko.Spec.RouteResponseSelectionExpression
 	}
 	if r.ko.Spec.Target != nil {
-		res.SetTarget(*r.ko.Spec.Target)
+		res.Target = r.ko.Spec.Target
 	}
 
 	return res, nil
@@ -600,7 +540,7 @@ func (rm *resourceManager) sdkDelete(
 	}
 	var resp *svcsdk.DeleteRouteOutput
 	_ = resp
-	resp, err = rm.sdkapi.DeleteRouteWithContext(ctx, input)
+	resp, err = rm.sdkapi.DeleteRoute(ctx, input)
 	rm.metrics.RecordAPICall("DELETE", "DeleteRoute", err)
 	return nil, err
 }
@@ -613,10 +553,10 @@ func (rm *resourceManager) newDeleteRequestPayload(
 	res := &svcsdk.DeleteRouteInput{}
 
 	if r.ko.Spec.APIID != nil {
-		res.SetApiId(*r.ko.Spec.APIID)
+		res.ApiId = r.ko.Spec.APIID
 	}
 	if r.ko.Status.RouteID != nil {
-		res.SetRouteId(*r.ko.Status.RouteID)
+		res.RouteId = r.ko.Status.RouteID
 	}
 
 	return res, nil

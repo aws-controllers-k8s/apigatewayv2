@@ -25,11 +25,15 @@ import (
 // Represents a domain name.
 type DomainNameSpec struct {
 
+	// The domain name.
 	// +kubebuilder:validation:Required
-	DomainName               *string                       `json:"domainName"`
-	DomainNameConfigurations []*DomainNameConfiguration    `json:"domainNameConfigurations,omitempty"`
-	MutualTLSAuthentication  *MutualTLSAuthenticationInput `json:"mutualTLSAuthentication,omitempty"`
-	Tags                     map[string]*string            `json:"tags,omitempty"`
+	DomainName *string `json:"domainName"`
+	// The domain name configurations.
+	DomainNameConfigurations []*DomainNameConfiguration `json:"domainNameConfigurations,omitempty"`
+	// The mutual TLS authentication configuration for a custom domain name.
+	MutualTLSAuthentication *MutualTLSAuthenticationInput `json:"mutualTLSAuthentication,omitempty"`
+	// The collection of tags associated with a domain name.
+	Tags map[string]*string `json:"tags,omitempty"`
 }
 
 // DomainNameStatus defines the observed state of DomainName
@@ -45,6 +49,7 @@ type DomainNameStatus struct {
 	// resource
 	// +kubebuilder:validation:Optional
 	Conditions []*ackv1alpha1.Condition `json:"conditions"`
+	// The API mapping selection expression.
 	// +kubebuilder:validation:Optional
 	APIMappingSelectionExpression *string `json:"apiMappingSelectionExpression,omitempty"`
 }

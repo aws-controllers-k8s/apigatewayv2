@@ -24,11 +24,16 @@ import (
 //
 // Represents an API mapping.
 type APIMappingSpec struct {
-	APIID         *string                                  `json:"apiID,omitempty"`
+
+	// The API identifier.
+	APIID *string `json:"apiID,omitempty"`
+	// The API mapping key.
 	APIMappingKey *string                                  `json:"apiMappingKey,omitempty"`
 	APIRef        *ackv1alpha1.AWSResourceReferenceWrapper `json:"apiRef,omitempty"`
-	DomainName    *string                                  `json:"domainName,omitempty"`
-	DomainRef     *ackv1alpha1.AWSResourceReferenceWrapper `json:"domainRef,omitempty"`
+	// The domain name.
+	DomainName *string                                  `json:"domainName,omitempty"`
+	DomainRef  *ackv1alpha1.AWSResourceReferenceWrapper `json:"domainRef,omitempty"`
+	// The API stage.
 	// +kubebuilder:validation:Required
 	Stage *string `json:"stage"`
 }
@@ -46,6 +51,7 @@ type APIMappingStatus struct {
 	// resource
 	// +kubebuilder:validation:Optional
 	Conditions []*ackv1alpha1.Condition `json:"conditions"`
+	// The API mapping identifier.
 	// +kubebuilder:validation:Optional
 	APIMappingID *string `json:"apiMappingID,omitempty"`
 }

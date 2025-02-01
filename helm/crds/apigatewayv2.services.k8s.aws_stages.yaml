@@ -43,7 +43,7 @@ spec:
               Represents an API stage.
             properties:
               accessLogSettings:
-                description: Settings for logging access in a stage.
+                description: Settings for logging access in this stage.
                 properties:
                   destinationARN:
                     description: Represents an Amazon Resource Name (ARN).
@@ -53,6 +53,7 @@ spec:
                     type: string
                 type: object
               apiID:
+                description: The API identifier.
                 type: string
               apiRef:
                 description: "AWSResourceReferenceWrapper provides a wrapper around
@@ -72,11 +73,17 @@ spec:
                     type: object
                 type: object
               autoDeploy:
+                description: |-
+                  Specifies whether updates to an API automatically trigger a new deployment.
+                  The default value is false.
                 type: boolean
               clientCertificateID:
+                description: |-
+                  The identifier of a client certificate for a Stage. Supported only for WebSocket
+                  APIs.
                 type: string
               defaultRouteSettings:
-                description: Represents a collection of route settings.
+                description: The default route settings for the stage.
                 properties:
                   dataTraceEnabled:
                     type: boolean
@@ -92,6 +99,7 @@ spec:
                     type: number
                 type: object
               deploymentID:
+                description: The deployment identifier of the API stage.
                 type: string
               deploymentRef:
                 description: "AWSResourceReferenceWrapper provides a wrapper around
@@ -111,6 +119,7 @@ spec:
                     type: object
                 type: object
               description:
+                description: The description for the API stage.
                 type: string
               routeSettings:
                 additionalProperties:
@@ -129,16 +138,23 @@ spec:
                     throttlingRateLimit:
                       type: number
                   type: object
+                description: Route settings for the stage, by routeKey.
                 type: object
               stageName:
+                description: The name of the stage.
                 type: string
               stageVariables:
                 additionalProperties:
                   type: string
+                description: |-
+                  A map that defines the stage variables for a Stage. Variable names can have
+                  alphanumeric and underscore characters, and the values must match [A-Za-z0-9-._~:/?#&=,]+.
                 type: object
               tags:
                 additionalProperties:
                   type: string
+                description: The collection of tags. Each tag element is associated
+                  with a given resource.
                 type: object
             required:
             - stageName
@@ -176,6 +192,10 @@ spec:
                 - region
                 type: object
               apiGatewayManaged:
+                description: |-
+                  Specifies whether a stage is managed by API Gateway. If you created an API
+                  using quick create, the $default stage is managed by API Gateway. You can't
+                  modify the $default stage.
                 type: boolean
               conditions:
                 description: |-
@@ -213,11 +233,16 @@ spec:
                   type: object
                 type: array
               createdDate:
+                description: The timestamp when the stage was created.
                 format: date-time
                 type: string
               lastDeploymentStatusMessage:
+                description: |-
+                  Describes the status of the last deployment of a stage. Supported only for
+                  stages with autoDeploy enabled.
                 type: string
               lastUpdatedDate:
+                description: The timestamp when the stage was last updated.
                 format: date-time
                 type: string
             type: object

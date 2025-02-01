@@ -25,12 +25,16 @@ import (
 // Represents a VPC link.
 type VPCLinkSpec struct {
 
+	// The name of the VPC link.
 	// +kubebuilder:validation:Required
-	Name             *string   `json:"name"`
+	Name *string `json:"name"`
+	// A list of security group IDs for the VPC link.
 	SecurityGroupIDs []*string `json:"securityGroupIDs,omitempty"`
+	// A list of subnet IDs to include in the VPC link.
 	// +kubebuilder:validation:Required
-	SubnetIDs []*string          `json:"subnetIDs"`
-	Tags      map[string]*string `json:"tags,omitempty"`
+	SubnetIDs []*string `json:"subnetIDs"`
+	// A list of tags.
+	Tags map[string]*string `json:"tags,omitempty"`
 }
 
 // VPCLinkStatus defines the observed state of VPCLink
@@ -46,14 +50,19 @@ type VPCLinkStatus struct {
 	// resource
 	// +kubebuilder:validation:Optional
 	Conditions []*ackv1alpha1.Condition `json:"conditions"`
+	// The timestamp when the VPC link was created.
 	// +kubebuilder:validation:Optional
 	CreatedDate *metav1.Time `json:"createdDate,omitempty"`
+	// The ID of the VPC link.
 	// +kubebuilder:validation:Optional
 	VPCLinkID *string `json:"vpcLinkID,omitempty"`
+	// The status of the VPC link.
 	// +kubebuilder:validation:Optional
 	VPCLinkStatus *string `json:"vpcLinkStatus,omitempty"`
+	// A message summarizing the cause of the status of the VPC link.
 	// +kubebuilder:validation:Optional
 	VPCLinkStatusMessage *string `json:"vpcLinkStatusMessage,omitempty"`
+	// The version of the VPC link.
 	// +kubebuilder:validation:Optional
 	VPCLinkVersion *string `json:"vpcLinkVersion,omitempty"`
 }

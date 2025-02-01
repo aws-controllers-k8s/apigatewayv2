@@ -28,8 +28,10 @@ import (
 	ackerr "github.com/aws-controllers-k8s/runtime/pkg/errors"
 	ackrequeue "github.com/aws-controllers-k8s/runtime/pkg/requeue"
 	ackrtlog "github.com/aws-controllers-k8s/runtime/pkg/runtime/log"
-	"github.com/aws/aws-sdk-go/aws"
-	svcsdk "github.com/aws/aws-sdk-go/service/apigatewayv2"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	svcsdk "github.com/aws/aws-sdk-go-v2/service/apigatewayv2"
+	svcsdktypes "github.com/aws/aws-sdk-go-v2/service/apigatewayv2/types"
+	smithy "github.com/aws/smithy-go"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -40,8 +42,7 @@ import (
 var (
 	_ = &metav1.Time{}
 	_ = strings.ToLower("")
-	_ = &aws.JSONValue{}
-	_ = &svcsdk.ApiGatewayV2{}
+	_ = &svcsdk.Client{}
 	_ = &svcapitypes.DomainName{}
 	_ = ackv1alpha1.AWSAccountID("")
 	_ = &ackerr.NotFound
@@ -49,6 +50,7 @@ var (
 	_ = &reflect.Value{}
 	_ = fmt.Sprintf("")
 	_ = &ackrequeue.NoRequeue{}
+	_ = &aws.Config{}
 )
 
 // sdkFind returns SDK-specific information about a supplied resource
@@ -74,13 +76,11 @@ func (rm *resourceManager) sdkFind(
 	}
 
 	var resp *svcsdk.GetDomainNameOutput
-	resp, err = rm.sdkapi.GetDomainNameWithContext(ctx, input)
+	resp, err = rm.sdkapi.GetDomainName(ctx, input)
 	rm.metrics.RecordAPICall("READ_ONE", "GetDomainName", err)
 	if err != nil {
-		if reqErr, ok := ackerr.AWSRequestFailure(err); ok && reqErr.StatusCode() == 404 {
-			return nil, ackerr.NotFound
-		}
-		if awsErr, ok := ackerr.AWSError(err); ok && awsErr.Code() == "NotFoundException" {
+		var awsErr smithy.APIError
+		if errors.As(err, &awsErr) && awsErr.ErrorCode() == "NotFoundException" {
 			return nil, ackerr.NotFound
 		}
 		return nil, err
@@ -110,14 +110,14 @@ func (rm *resourceManager) sdkFind(
 			if f2iter.CertificateName != nil {
 				f2elem.CertificateName = f2iter.CertificateName
 			}
-			if f2iter.EndpointType != nil {
-				f2elem.EndpointType = f2iter.EndpointType
+			if f2iter.EndpointType != "" {
+				f2elem.EndpointType = aws.String(string(f2iter.EndpointType))
 			}
 			if f2iter.OwnershipVerificationCertificateArn != nil {
 				f2elem.OwnershipVerificationCertificateARN = f2iter.OwnershipVerificationCertificateArn
 			}
-			if f2iter.SecurityPolicy != nil {
-				f2elem.SecurityPolicy = f2iter.SecurityPolicy
+			if f2iter.SecurityPolicy != "" {
+				f2elem.SecurityPolicy = aws.String(string(f2iter.SecurityPolicy))
 			}
 			f2 = append(f2, f2elem)
 		}
@@ -138,13 +138,7 @@ func (rm *resourceManager) sdkFind(
 		ko.Spec.MutualTLSAuthentication = nil
 	}
 	if resp.Tags != nil {
-		f4 := map[string]*string{}
-		for f4key, f4valiter := range resp.Tags {
-			var f4val string
-			f4val = *f4valiter
-			f4[f4key] = &f4val
-		}
-		ko.Spec.Tags = f4
+		ko.Spec.Tags = aws.StringMap(resp.Tags)
 	} else {
 		ko.Spec.Tags = nil
 	}
@@ -171,7 +165,7 @@ func (rm *resourceManager) newDescribeRequestPayload(
 	res := &svcsdk.GetDomainNameInput{}
 
 	if r.ko.Spec.DomainName != nil {
-		res.SetDomainName(*r.ko.Spec.DomainName)
+		res.DomainName = r.ko.Spec.DomainName
 	}
 
 	return res, nil
@@ -196,7 +190,7 @@ func (rm *resourceManager) sdkCreate(
 
 	var resp *svcsdk.CreateDomainNameOutput
 	_ = resp
-	resp, err = rm.sdkapi.CreateDomainNameWithContext(ctx, input)
+	resp, err = rm.sdkapi.CreateDomainName(ctx, input)
 	rm.metrics.RecordAPICall("CREATE", "CreateDomainName", err)
 	if err != nil {
 		return nil, err
@@ -225,14 +219,14 @@ func (rm *resourceManager) sdkCreate(
 			if f2iter.CertificateName != nil {
 				f2elem.CertificateName = f2iter.CertificateName
 			}
-			if f2iter.EndpointType != nil {
-				f2elem.EndpointType = f2iter.EndpointType
+			if f2iter.EndpointType != "" {
+				f2elem.EndpointType = aws.String(string(f2iter.EndpointType))
 			}
 			if f2iter.OwnershipVerificationCertificateArn != nil {
 				f2elem.OwnershipVerificationCertificateARN = f2iter.OwnershipVerificationCertificateArn
 			}
-			if f2iter.SecurityPolicy != nil {
-				f2elem.SecurityPolicy = f2iter.SecurityPolicy
+			if f2iter.SecurityPolicy != "" {
+				f2elem.SecurityPolicy = aws.String(string(f2iter.SecurityPolicy))
 			}
 			f2 = append(f2, f2elem)
 		}
@@ -253,13 +247,7 @@ func (rm *resourceManager) sdkCreate(
 		ko.Spec.MutualTLSAuthentication = nil
 	}
 	if resp.Tags != nil {
-		f4 := map[string]*string{}
-		for f4key, f4valiter := range resp.Tags {
-			var f4val string
-			f4val = *f4valiter
-			f4[f4key] = &f4val
-		}
-		ko.Spec.Tags = f4
+		ko.Spec.Tags = aws.StringMap(resp.Tags)
 	} else {
 		ko.Spec.Tags = nil
 	}
@@ -277,49 +265,43 @@ func (rm *resourceManager) newCreateRequestPayload(
 	res := &svcsdk.CreateDomainNameInput{}
 
 	if r.ko.Spec.DomainName != nil {
-		res.SetDomainName(*r.ko.Spec.DomainName)
+		res.DomainName = r.ko.Spec.DomainName
 	}
 	if r.ko.Spec.DomainNameConfigurations != nil {
-		f1 := []*svcsdk.DomainNameConfiguration{}
+		f1 := []svcsdktypes.DomainNameConfiguration{}
 		for _, f1iter := range r.ko.Spec.DomainNameConfigurations {
-			f1elem := &svcsdk.DomainNameConfiguration{}
+			f1elem := &svcsdktypes.DomainNameConfiguration{}
 			if f1iter.CertificateARN != nil {
-				f1elem.SetCertificateArn(*f1iter.CertificateARN)
+				f1elem.CertificateArn = f1iter.CertificateARN
 			}
 			if f1iter.CertificateName != nil {
-				f1elem.SetCertificateName(*f1iter.CertificateName)
+				f1elem.CertificateName = f1iter.CertificateName
 			}
 			if f1iter.EndpointType != nil {
-				f1elem.SetEndpointType(*f1iter.EndpointType)
+				f1elem.EndpointType = svcsdktypes.EndpointType(*f1iter.EndpointType)
 			}
 			if f1iter.OwnershipVerificationCertificateARN != nil {
-				f1elem.SetOwnershipVerificationCertificateArn(*f1iter.OwnershipVerificationCertificateARN)
+				f1elem.OwnershipVerificationCertificateArn = f1iter.OwnershipVerificationCertificateARN
 			}
 			if f1iter.SecurityPolicy != nil {
-				f1elem.SetSecurityPolicy(*f1iter.SecurityPolicy)
+				f1elem.SecurityPolicy = svcsdktypes.SecurityPolicy(*f1iter.SecurityPolicy)
 			}
-			f1 = append(f1, f1elem)
+			f1 = append(f1, *f1elem)
 		}
-		res.SetDomainNameConfigurations(f1)
+		res.DomainNameConfigurations = f1
 	}
 	if r.ko.Spec.MutualTLSAuthentication != nil {
-		f2 := &svcsdk.MutualTlsAuthenticationInput{}
+		f2 := &svcsdktypes.MutualTlsAuthenticationInput{}
 		if r.ko.Spec.MutualTLSAuthentication.TruststoreURI != nil {
-			f2.SetTruststoreUri(*r.ko.Spec.MutualTLSAuthentication.TruststoreURI)
+			f2.TruststoreUri = r.ko.Spec.MutualTLSAuthentication.TruststoreURI
 		}
 		if r.ko.Spec.MutualTLSAuthentication.TruststoreVersion != nil {
-			f2.SetTruststoreVersion(*r.ko.Spec.MutualTLSAuthentication.TruststoreVersion)
+			f2.TruststoreVersion = r.ko.Spec.MutualTLSAuthentication.TruststoreVersion
 		}
-		res.SetMutualTlsAuthentication(f2)
+		res.MutualTlsAuthentication = f2
 	}
 	if r.ko.Spec.Tags != nil {
-		f3 := map[string]*string{}
-		for f3key, f3valiter := range r.ko.Spec.Tags {
-			var f3val string
-			f3val = *f3valiter
-			f3[f3key] = &f3val
-		}
-		res.SetTags(f3)
+		res.Tags = aws.ToStringMap(r.ko.Spec.Tags)
 	}
 
 	return res, nil
@@ -345,7 +327,7 @@ func (rm *resourceManager) sdkUpdate(
 
 	var resp *svcsdk.UpdateDomainNameOutput
 	_ = resp
-	resp, err = rm.sdkapi.UpdateDomainNameWithContext(ctx, input)
+	resp, err = rm.sdkapi.UpdateDomainName(ctx, input)
 	rm.metrics.RecordAPICall("UPDATE", "UpdateDomainName", err)
 	if err != nil {
 		return nil, err
@@ -374,14 +356,14 @@ func (rm *resourceManager) sdkUpdate(
 			if f2iter.CertificateName != nil {
 				f2elem.CertificateName = f2iter.CertificateName
 			}
-			if f2iter.EndpointType != nil {
-				f2elem.EndpointType = f2iter.EndpointType
+			if f2iter.EndpointType != "" {
+				f2elem.EndpointType = aws.String(string(f2iter.EndpointType))
 			}
 			if f2iter.OwnershipVerificationCertificateArn != nil {
 				f2elem.OwnershipVerificationCertificateARN = f2iter.OwnershipVerificationCertificateArn
 			}
-			if f2iter.SecurityPolicy != nil {
-				f2elem.SecurityPolicy = f2iter.SecurityPolicy
+			if f2iter.SecurityPolicy != "" {
+				f2elem.SecurityPolicy = aws.String(string(f2iter.SecurityPolicy))
 			}
 			f2 = append(f2, f2elem)
 		}
@@ -402,13 +384,7 @@ func (rm *resourceManager) sdkUpdate(
 		ko.Spec.MutualTLSAuthentication = nil
 	}
 	if resp.Tags != nil {
-		f4 := map[string]*string{}
-		for f4key, f4valiter := range resp.Tags {
-			var f4val string
-			f4val = *f4valiter
-			f4[f4key] = &f4val
-		}
-		ko.Spec.Tags = f4
+		ko.Spec.Tags = aws.StringMap(resp.Tags)
 	} else {
 		ko.Spec.Tags = nil
 	}
@@ -427,40 +403,40 @@ func (rm *resourceManager) newUpdateRequestPayload(
 	res := &svcsdk.UpdateDomainNameInput{}
 
 	if r.ko.Spec.DomainName != nil {
-		res.SetDomainName(*r.ko.Spec.DomainName)
+		res.DomainName = r.ko.Spec.DomainName
 	}
 	if r.ko.Spec.DomainNameConfigurations != nil {
-		f1 := []*svcsdk.DomainNameConfiguration{}
+		f1 := []svcsdktypes.DomainNameConfiguration{}
 		for _, f1iter := range r.ko.Spec.DomainNameConfigurations {
-			f1elem := &svcsdk.DomainNameConfiguration{}
+			f1elem := &svcsdktypes.DomainNameConfiguration{}
 			if f1iter.CertificateARN != nil {
-				f1elem.SetCertificateArn(*f1iter.CertificateARN)
+				f1elem.CertificateArn = f1iter.CertificateARN
 			}
 			if f1iter.CertificateName != nil {
-				f1elem.SetCertificateName(*f1iter.CertificateName)
+				f1elem.CertificateName = f1iter.CertificateName
 			}
 			if f1iter.EndpointType != nil {
-				f1elem.SetEndpointType(*f1iter.EndpointType)
+				f1elem.EndpointType = svcsdktypes.EndpointType(*f1iter.EndpointType)
 			}
 			if f1iter.OwnershipVerificationCertificateARN != nil {
-				f1elem.SetOwnershipVerificationCertificateArn(*f1iter.OwnershipVerificationCertificateARN)
+				f1elem.OwnershipVerificationCertificateArn = f1iter.OwnershipVerificationCertificateARN
 			}
 			if f1iter.SecurityPolicy != nil {
-				f1elem.SetSecurityPolicy(*f1iter.SecurityPolicy)
+				f1elem.SecurityPolicy = svcsdktypes.SecurityPolicy(*f1iter.SecurityPolicy)
 			}
-			f1 = append(f1, f1elem)
+			f1 = append(f1, *f1elem)
 		}
-		res.SetDomainNameConfigurations(f1)
+		res.DomainNameConfigurations = f1
 	}
 	if r.ko.Spec.MutualTLSAuthentication != nil {
-		f2 := &svcsdk.MutualTlsAuthenticationInput{}
+		f2 := &svcsdktypes.MutualTlsAuthenticationInput{}
 		if r.ko.Spec.MutualTLSAuthentication.TruststoreURI != nil {
-			f2.SetTruststoreUri(*r.ko.Spec.MutualTLSAuthentication.TruststoreURI)
+			f2.TruststoreUri = r.ko.Spec.MutualTLSAuthentication.TruststoreURI
 		}
 		if r.ko.Spec.MutualTLSAuthentication.TruststoreVersion != nil {
-			f2.SetTruststoreVersion(*r.ko.Spec.MutualTLSAuthentication.TruststoreVersion)
+			f2.TruststoreVersion = r.ko.Spec.MutualTLSAuthentication.TruststoreVersion
 		}
-		res.SetMutualTlsAuthentication(f2)
+		res.MutualTlsAuthentication = f2
 	}
 
 	return res, nil
@@ -482,7 +458,7 @@ func (rm *resourceManager) sdkDelete(
 	}
 	var resp *svcsdk.DeleteDomainNameOutput
 	_ = resp
-	resp, err = rm.sdkapi.DeleteDomainNameWithContext(ctx, input)
+	resp, err = rm.sdkapi.DeleteDomainName(ctx, input)
 	rm.metrics.RecordAPICall("DELETE", "DeleteDomainName", err)
 	return nil, err
 }
@@ -495,7 +471,7 @@ func (rm *resourceManager) newDeleteRequestPayload(
 	res := &svcsdk.DeleteDomainNameInput{}
 
 	if r.ko.Spec.DomainName != nil {
-		res.SetDomainName(*r.ko.Spec.DomainName)
+		res.DomainName = r.ko.Spec.DomainName
 	}
 
 	return res, nil
@@ -603,11 +579,12 @@ func (rm *resourceManager) terminalAWSError(err error) bool {
 	if err == nil {
 		return false
 	}
-	awsErr, ok := ackerr.AWSError(err)
-	if !ok {
+
+	var terminalErr smithy.APIError
+	if !errors.As(err, &terminalErr) {
 		return false
 	}
-	switch awsErr.Code() {
+	switch terminalErr.ErrorCode() {
 	case "BadRequestException":
 		return true
 	default:
